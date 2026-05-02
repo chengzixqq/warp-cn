@@ -38,6 +38,18 @@ jobs:
         run: |
           git config user.name "warp-cn-sync[bot]"
           git config user.email "warp-cn-sync@users.noreply.github.com"
+          git config rerere.enabled true
+          git config rerere.autoupdate true
+
+      # 跨 workflow run 持久化 .git/rr-cache/，让上次解过的同 hunk 冲突自动 replay。
+      # restore-keys 兜底：cache miss 时拉最新 rerere-cache- 前缀的快照。
+      - name: Restore rerere cache
+        uses: actions/cache@v4
+        with:
+          path: .git/rr-cache
+          key: rerere-cache-${{ github.run_id }}
+          restore-keys: |
+            rerere-cache-
 
       - name: Install i18n-aware merge driver
         run: ./script/install-merge-driver
