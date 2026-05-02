@@ -23,6 +23,8 @@ fn main() -> Result<()> {
     }
 
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=.git/HEAD");
+    println!("cargo:rerun-if-changed=.git/refs/tags");
     println!("cargo:rerun-if-env-changed=CARGO_CFG_TARGET_OS");
     println!("cargo:rerun-if-env-changed=CARGO_CFG_TARGET_FAMILY");
     println!("cargo:rerun-if-env-changed=GIT_RELEASE_TAG");
@@ -235,47 +237,70 @@ fn emit_git_release_tag_if_unset() {
         return;
     }
 
-    let Ok(output) = Command::new("git")
-        .args(["describe", "--tags", "--exact-match", "HEAD"])
-        .output()
-    else {
-        return;
-    };
-
-    if !output.status.success() {
-        return;
+    if let Some(tag) = git_describe(&["--tags", "--exact-match", "HEAD"]) {
+        if looks_like_release_tag(&tag) {
+            println!("cargo:rustc-env=GIT_RELEASE_TAG={tag}");
+            return;
+        }
     }
 
-    let tag = String::from_utf8_lossy(&output.stdout);
-    let tag = tag.trim();
-    if !tag.is_empty() && looks_like_release_tag(tag) {
-        println!("cargo:rustc-env=GIT_RELEASE_TAG={tag}");
+    if let Some(tag) = git_describe(&["--tags", "--abbrev=0"]) {
+        if looks_like_release_tag(&tag) {
+            println!("cargo:rustc-env=GIT_RELEASE_TAG={tag}");
+        }
     }
 }
 
-/// Strict warp release shape: `v<major>.<YYYY>.<MM>.<DD>.<HH>.<mm>.<channel>_<patch>`.
-/// Mirrors the runtime parser in `app/src/github_update/mod.rs::ParsedGithubVersion::parse`,
-/// so any tag we inject is guaranteed to round-trip through the update checker.
+fn git_describe(args: &[&str]) -> Option<String> {
+    let output = Command::new("git").arg("describe").args(args).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let tag = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if tag.is_empty() { None } else { Some(tag) }
+}
+
+/// Accepts two release tag shapes (mirrors `ParsedGithubVersion::parse`):
+///   - `v<major>.<YYYY>.<MM>.<DD>.<HH>.<mm>.<channel>_<patch>`  (7-segment, CI)
+///   - `v<major>.<YYYY>.<MM>.<DD>-<channel>.<patch>`            (5-segment, GitHub Releases)
 fn looks_like_release_tag(tag: &str) -> bool {
     let Some(rest) = tag.strip_prefix('v') else {
         return false;
     };
     let parts: Vec<&str> = rest.split('.').collect();
-    if parts.len() != 7 {
-        return false;
-    }
-    for part in &parts[..6] {
-        if part.is_empty() || !part.chars().all(|c| c.is_ascii_digit()) {
-            return false;
+    match parts.len() {
+        5 => {
+            for part in &parts[..3] {
+                if part.is_empty() || !part.chars().all(|c| c.is_ascii_digit()) {
+                    return false;
+                }
+            }
+            let Some((day, channel)) = parts[3].split_once('-') else {
+                return false;
+            };
+            !day.is_empty()
+                && day.chars().all(|c| c.is_ascii_digit())
+                && !channel.is_empty()
+                && channel.chars().all(|c| c.is_ascii_alphabetic())
+                && !parts[4].is_empty()
+                && parts[4].chars().all(|c| c.is_ascii_digit())
         }
+        7 => {
+            for part in &parts[..6] {
+                if part.is_empty() || !part.chars().all(|c| c.is_ascii_digit()) {
+                    return false;
+                }
+            }
+            let Some((channel, patch)) = parts[6].split_once('_') else {
+                return false;
+            };
+            !channel.is_empty()
+                && channel.chars().all(|c| c.is_ascii_alphabetic())
+                && !patch.is_empty()
+                && patch.chars().all(|c| c.is_ascii_digit())
+        }
+        _ => false,
     }
-    let Some((channel, patch)) = parts[6].split_once('_') else {
-        return false;
-    };
-    !channel.is_empty()
-        && channel.chars().all(|c| c.is_ascii_alphabetic())
-        && !patch.is_empty()
-        && patch.chars().all(|c| c.is_ascii_digit())
 }
 
 fn get_build_profile_name() -> String {

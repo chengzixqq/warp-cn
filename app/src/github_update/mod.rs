@@ -101,10 +101,14 @@ async fn check_for_update() -> Result<CheckResult> {
         .timeout(REQUEST_TIMEOUT)
         .build()
         .context("Failed to construct reqwest client")?;
-    let response = client
+    let mut request = client
         .get(REPO_API_URL)
         .header(reqwest::header::USER_AGENT, USER_AGENT)
-        .header(reqwest::header::ACCEPT, ACCEPT_HEADER)
+        .header(reqwest::header::ACCEPT, ACCEPT_HEADER);
+    if let Some(token) = resolve_github_token() {
+        request = request.header(reqwest::header::AUTHORIZATION, format!("Bearer {token}"));
+    }
+    let response = request
         .send()
         .await
         .context("Failed to fetch latest GitHub release")?
@@ -134,22 +138,13 @@ async fn check_for_update() -> Result<CheckResult> {
     let latest = ParsedGithubVersion::parse(&tag)
         .with_context(|| format!("Failed to parse latest GitHub release tag {tag}"))?;
 
-    match ChannelState::app_version() {
-        // Untagged local build (`cargo run`, dev work, or a packaged build that
-        // failed to embed `GIT_RELEASE_TAG`). Surface the latest release as
-        // available so the user has a path to a versioned binary.
+    let current_version = ChannelState::app_version().or(option_env!("GIT_RELEASE_TAG"));
+    match current_version {
         None => Ok(CheckResult::UpdateAvailable { tag, html_url }),
         Some(current_tag) => {
             let current = ParsedGithubVersion::parse(current_tag).with_context(|| {
                 format!("Failed to parse current version tag {current_tag}")
             })?;
-            if latest.channel != current.channel {
-                bail!(
-                    "Latest release channel `{}` differs from current channel `{}`",
-                    latest.channel,
-                    current.channel
-                );
-            }
             if latest.cmp_numeric(&current) == Ordering::Greater {
                 Ok(CheckResult::UpdateAvailable { tag, html_url })
             } else {
@@ -172,29 +167,48 @@ struct ParsedGithubVersion {
 }
 
 impl ParsedGithubVersion {
+    /// Accepts two tag shapes:
+    ///   - `v<major>.<YYYY>.<MM>.<DD>.<HH>.<mm>.<channel>_<patch>`  (7-segment, CI)
+    ///   - `v<major>.<YYYY>.<MM>.<DD>-<channel>.<patch>`            (5-segment, GitHub Releases)
     fn parse(tag: &str) -> Result<Self> {
         let body = tag
             .strip_prefix('v')
             .ok_or_else(|| anyhow!("Version tag must start with 'v'"))?;
         let parts: Vec<&str> = body.split('.').collect();
-        if parts.len() != 7 {
-            bail!("Version tag must have 7 dot-separated components");
+
+        match parts.len() {
+            5 => {
+                let (day, channel) = parts[3]
+                    .split_once('-')
+                    .ok_or_else(|| anyhow!("4th component must be DD-channel"))?;
+                Ok(Self {
+                    major: parts[0].parse().context("Invalid major version")?,
+                    year: parts[1].parse().context("Invalid year")?,
+                    month: parts[2].parse().context("Invalid month")?,
+                    day: day.parse().context("Invalid day")?,
+                    hour: 0,
+                    minute: 0,
+                    channel: channel.to_string(),
+                    patch: parts[4].parse().context("Invalid patch")?,
+                })
+            }
+            7 => {
+                let (channel, patch) = parts[6]
+                    .split_once('_')
+                    .ok_or_else(|| anyhow!("7th component must be <channel>_<patch>"))?;
+                Ok(Self {
+                    major: parts[0].parse().context("Invalid major version")?,
+                    year: parts[1].parse().context("Invalid year")?,
+                    month: parts[2].parse().context("Invalid month")?,
+                    day: parts[3].parse().context("Invalid day")?,
+                    hour: parts[4].parse().context("Invalid hour")?,
+                    minute: parts[5].parse().context("Invalid minute")?,
+                    channel: channel.to_string(),
+                    patch: patch.parse().context("Invalid patch")?,
+                })
+            }
+            _ => bail!("Version tag must have 5 or 7 dot-separated components"),
         }
-
-        let (channel, patch) = parts[6]
-            .split_once('_')
-            .ok_or_else(|| anyhow!("Version tag must end with <channel>_<patch>"))?;
-
-        Ok(Self {
-            major: parts[0].parse().context("Invalid major version")?,
-            year: parts[1].parse().context("Invalid year")?,
-            month: parts[2].parse().context("Invalid month")?,
-            day: parts[3].parse().context("Invalid day")?,
-            hour: parts[4].parse().context("Invalid hour")?,
-            minute: parts[5].parse().context("Invalid minute")?,
-            channel: channel.to_string(),
-            patch: patch.parse().context("Invalid patch")?,
-        })
     }
 
     fn cmp_numeric(&self, other: &Self) -> Ordering {
@@ -219,12 +233,39 @@ impl ParsedGithubVersion {
     }
 }
 
+fn resolve_github_token() -> Option<String> {
+    if let Ok(token) = std::env::var("GITHUB_TOKEN") {
+        if !token.is_empty() {
+            return Some(token);
+        }
+    }
+    read_gh_cli_token()
+}
+
+fn read_gh_cli_token() -> Option<String> {
+    let config_path = dirs::config_dir()?.join("gh").join("hosts.yml");
+    let contents = std::fs::read_to_string(config_path).ok()?;
+    let hosts: serde_yaml::Value = serde_yaml::from_str(&contents).ok()?;
+    let github = hosts.get("github.com")?;
+    if let Some(token) = github.get("oauth_token").and_then(|v| v.as_str()) {
+        if !token.is_empty() {
+            return Some(token.to_string());
+        }
+    }
+    let (_, first_user) = github.get("users")?.as_mapping()?.into_iter().next()?;
+    first_user
+        .get("oauth_token")?
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn parse_round_trip() {
+    fn parse_7_segment() {
         let p = ParsedGithubVersion::parse("v0.2026.04.27.15.32.stable_03").unwrap();
         assert_eq!(p.major, 0);
         assert_eq!(p.year, 2026);
@@ -237,12 +278,32 @@ mod tests {
     }
 
     #[test]
+    fn parse_5_segment() {
+        let p = ParsedGithubVersion::parse("v0.2026.05.02-cn.0").unwrap();
+        assert_eq!(p.major, 0);
+        assert_eq!(p.year, 2026);
+        assert_eq!(p.month, 5);
+        assert_eq!(p.day, 2);
+        assert_eq!(p.hour, 0);
+        assert_eq!(p.minute, 0);
+        assert_eq!(p.channel, "cn");
+        assert_eq!(p.patch, 0);
+    }
+
+    #[test]
     fn newer_patch_is_greater() {
         let a = ParsedGithubVersion::parse("v0.2026.04.27.15.32.stable_03").unwrap();
         let b = ParsedGithubVersion::parse("v0.2026.04.27.15.32.stable_05").unwrap();
         assert_eq!(b.cmp_numeric(&a), Ordering::Greater);
         assert_eq!(a.cmp_numeric(&b), Ordering::Less);
         assert_eq!(a.cmp_numeric(&a.clone()), Ordering::Equal);
+    }
+
+    #[test]
+    fn newer_date_5_segment() {
+        let a = ParsedGithubVersion::parse("v0.2026.05.01-cn.0").unwrap();
+        let b = ParsedGithubVersion::parse("v0.2026.05.02-cn.0").unwrap();
+        assert_eq!(b.cmp_numeric(&a), Ordering::Greater);
     }
 
     #[test]
@@ -257,5 +318,6 @@ mod tests {
         assert!(ParsedGithubVersion::parse("0.2026.04.27.15.32.stable_03").is_err());
         assert!(ParsedGithubVersion::parse("v0.2026.04.27.15.stable_03").is_err());
         assert!(ParsedGithubVersion::parse("v0.2026.04.27.15.32.stable").is_err());
+        assert!(ParsedGithubVersion::parse("v0.2026.05.02cn.0").is_err());
     }
 }
