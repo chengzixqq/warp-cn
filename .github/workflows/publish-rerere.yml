@@ -88,32 +88,28 @@ jobs:
             exit 0
           fi
 
-          # 把人工解过的最终内容从 HEAD_SHA 拷回，覆盖未合并文件 / 处理 delete-conflicts。
-          while read -r f; do
-            [ -z "$f" ] && continue
-            if git cat-file -e "$HEAD_SHA:$f" 2>/dev/null; then
-              git checkout "$HEAD_SHA" -- "$f"
-              git add -- "$f"
-            else
-              git rm --quiet -- "$f"
-            fi
-          done < <(git diff --name-only --diff-filter=U)
+          # 用 git ls-files -u 获取所有未合并条目（涵盖 content / delete / rename 三类冲突），
+          # 按 HEAD_SHA 的最终状态拷回；HEAD_SHA 不存在的路径则 rm。
+          UNMERGED=$(git ls-files -u | awk '{print $4}' | sort -u)
+          if [ -n "$UNMERGED" ]; then
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              if git cat-file -e "$HEAD_SHA:$f" 2>/dev/null; then
+                git checkout "$HEAD_SHA" -- "$f"
+                git add -- "$f"
+              else
+                # 强制移除不在 HEAD_SHA 树里的未合并文件（rename/delete 场景）。
+                git rm --quiet --force --ignore-unmatch -- "$f" || true
+              fi
+            done <<< "$UNMERGED"
+          fi
 
-          # delete-by-them / delete-by-us 这种不在 diff-filter=U 里。
-          while read -r line; do
-            status=${line:0:2}
-            f=${line:3}
-            case "$status" in
-              "DU"|"UD"|"AU"|"UA")
-                if git cat-file -e "$HEAD_SHA:$f" 2>/dev/null; then
-                  git checkout "$HEAD_SHA" -- "$f"
-                  git add -- "$f"
-                else
-                  git rm --quiet -- "$f"
-                fi
-                ;;
-            esac
-          done < <(git status --porcelain)
+          # 最终校验：HEAD_SHA 树的内容应与当前 index 完全一致。
+          if [ -n "$(git diff --cached --name-only --diff-filter=U)" ]; then
+            echo "::error::Still have unmerged paths after resolution attempt"
+            git diff --cached --name-only --diff-filter=U
+            exit 1
+          fi
 
           git commit --no-edit -m "rerere: record resolution from $HEAD_SHA"
 
