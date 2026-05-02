@@ -72,7 +72,8 @@ impl SettingsWidget for AboutPageWidget {
             "bundled/svg/warp-logo-with-dark-title.svg"
         };
 
-        let version = ChannelState::app_version().unwrap_or("v#.##.###");
+        let version = ChannelState::app_version()
+            .unwrap_or(concat!(env!("CARGO_PKG_VERSION"), "-dev"));
 
         let version_text = ui_builder
             .span(version.to_string())

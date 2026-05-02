@@ -11,6 +11,7 @@ mod app_state;
 mod auth;
 mod autoupdate;
 mod banner;
+mod github_update;
 mod billing;
 mod changelog_model;
 mod chip_configurator;
@@ -1799,6 +1800,7 @@ fn initialize_app(
     }
 
     AutoupdateState::register(ctx, server_api.clone());
+    crate::github_update::GithubUpdateState::register(ctx);
 
     ctx.add_singleton_model(LocalWorkflows::new);
 

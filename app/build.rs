@@ -25,6 +25,9 @@ fn main() -> Result<()> {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-env-changed=CARGO_CFG_TARGET_OS");
     println!("cargo:rerun-if-env-changed=CARGO_CFG_TARGET_FAMILY");
+    println!("cargo:rerun-if-env-changed=GIT_RELEASE_TAG");
+
+    emit_git_release_tag_if_unset();
 
     let target_os = env::var("CARGO_CFG_TARGET_OS")?;
     let target_family = env::var("CARGO_CFG_TARGET_FAMILY")?;
@@ -211,6 +214,68 @@ fn generate_channel_config_if_needed(target_family: &str, target_os: &str) {
             panic!("Failed to write config to {}: {err}", config_path.display())
         });
     }
+}
+
+/// When `GIT_RELEASE_TAG` is not provided by the build environment, try to
+/// detect it from the working tree via `git describe --tags --exact-match`.
+/// Only succeeds when HEAD is exactly on a tag matching the warp release
+/// format. Silently no-ops on shallow clones / source tarballs / dev builds —
+/// callers that hit `ChannelState::app_version() == None` already handle that.
+///
+/// CI note: GitHub Actions' default shallow checkout strips tags. To pick up
+/// the tag here, the workflow must `actions/checkout` with `fetch-depth: 0`
+/// (or `fetch-tags: true`) — or set `GIT_RELEASE_TAG` directly.
+///
+/// We deliberately do NOT emit `rerun-if-changed=.git/HEAD`: that would force
+/// the `app` crate to recompile on every local commit, which dwarfs the value
+/// of auto-detection during dev work. Use `cargo clean -p warp` or `touch
+/// app/build.rs` to refresh after retagging locally.
+fn emit_git_release_tag_if_unset() {
+    if env::var("GIT_RELEASE_TAG").is_ok() {
+        return;
+    }
+
+    let Ok(output) = Command::new("git")
+        .args(["describe", "--tags", "--exact-match", "HEAD"])
+        .output()
+    else {
+        return;
+    };
+
+    if !output.status.success() {
+        return;
+    }
+
+    let tag = String::from_utf8_lossy(&output.stdout);
+    let tag = tag.trim();
+    if !tag.is_empty() && looks_like_release_tag(tag) {
+        println!("cargo:rustc-env=GIT_RELEASE_TAG={tag}");
+    }
+}
+
+/// Strict warp release shape: `v<major>.<YYYY>.<MM>.<DD>.<HH>.<mm>.<channel>_<patch>`.
+/// Mirrors the runtime parser in `app/src/github_update/mod.rs::ParsedGithubVersion::parse`,
+/// so any tag we inject is guaranteed to round-trip through the update checker.
+fn looks_like_release_tag(tag: &str) -> bool {
+    let Some(rest) = tag.strip_prefix('v') else {
+        return false;
+    };
+    let parts: Vec<&str> = rest.split('.').collect();
+    if parts.len() != 7 {
+        return false;
+    }
+    for part in &parts[..6] {
+        if part.is_empty() || !part.chars().all(|c| c.is_ascii_digit()) {
+            return false;
+        }
+    }
+    let Some((channel, patch)) = parts[6].split_once('_') else {
+        return false;
+    };
+    !channel.is_empty()
+        && channel.chars().all(|c| c.is_ascii_alphabetic())
+        && !patch.is_empty()
+        && patch.chars().all(|c| c.is_ascii_digit())
 }
 
 fn get_build_profile_name() -> String {

@@ -9,6 +9,7 @@ use super::{
 };
 use crate::auth::{AuthStateProvider, UserUid};
 use crate::autoupdate::{self, AutoupdateStage, AutoupdateState};
+use crate::github_update::GithubUpdateState;
 use crate::send_telemetry_from_ctx;
 use crate::workspaces::user_workspaces::UserWorkspaces;
 use crate::{
@@ -120,6 +121,7 @@ pub enum MainPageAction {
     Relaunch,
     DownloadUpdate,
     CheckForUpdate,
+    CheckGithubUpdate,
     ToggleSettingsSync,
     Upgrade {
         team_uid: Option<ServerId>,
@@ -202,6 +204,9 @@ impl TypedActionView for MainSettingsPageView {
                 ctx.emit(MainSettingsPageEvent::CheckForUpdate);
                 ctx.notify();
             }
+            MainPageAction::CheckGithubUpdate => {
+                GithubUpdateState::trigger_check(ctx);
+            }
             MainPageAction::ToggleSettingsSync => {
                 let new_value =
                     CloudPreferencesSettings::handle(ctx).update(ctx, |prefs_settings, ctx| {
@@ -261,6 +266,12 @@ impl MainSettingsPageView {
             Self::handle_autoupdate_state_change,
         );
 
+        let github_update_state_handle = GithubUpdateState::handle(ctx);
+        ctx.observe(
+            &github_update_state_handle,
+            Self::handle_github_update_state_change,
+        );
+
         ctx.subscribe_to_model(&CloudPreferencesSettings::handle(ctx), |_, _, _, ctx| {
             ctx.notify();
         });
@@ -279,9 +290,7 @@ impl MainSettingsPageView {
 
         widgets.push(Box::new(EarnRewardsWidget::default()));
 
-        if ChannelState::app_version().is_some() {
-            widgets.push(Box::new(VersionInfoWidget::default()));
-        }
+        widgets.push(Box::new(GithubVersionInfoWidget::default()));
 
         widgets.push(Box::new(LogoutWidget::default()));
 
@@ -293,6 +302,14 @@ impl MainSettingsPageView {
     fn handle_autoupdate_state_change(
         &mut self,
         _: ModelHandle<AutoupdateState>,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        ctx.notify();
+    }
+
+    fn handle_github_update_state_change(
+        &mut self,
+        _: ModelHandle<GithubUpdateState>,
         ctx: &mut ViewContext<Self>,
     ) {
         ctx.notify();
@@ -802,12 +819,16 @@ impl SettingsWidget for EarnRewardsWidget {
     }
 }
 
+// Retained for upstream-merge compatibility. The fork uses
+// `GithubVersionInfoWidget` instead; this widget is no longer registered.
+#[allow(dead_code)]
 #[derive(Default)]
 struct VersionInfoWidget {
     copy_version_button_mouse_state: MouseStateHandle,
     version_info_cta_link_mouse_state: MouseStateHandle,
 }
 
+#[allow(dead_code)]
 impl VersionInfoWidget {
     fn render_version_info(
         &self,
@@ -1033,6 +1054,207 @@ impl SettingsWidget for VersionInfoWidget {
             log::error!("Shouldn't render VersionInfoWidget without GIT_RELEASE_TAG");
             Empty::new().finish()
         }
+    }
+}
+
+#[derive(Default)]
+struct GithubVersionInfoWidget {
+    copy_version_button_mouse_state: MouseStateHandle,
+    version_info_cta_link_mouse_state: MouseStateHandle,
+}
+
+impl GithubVersionInfoWidget {
+    fn render_version_info(
+        &self,
+        version: &'static str,
+        appearance: &Appearance,
+        app: &AppContext,
+    ) -> Box<dyn Element> {
+        let faded_text_color = appearance
+            .theme()
+            .active_ui_text_color()
+            .with_opacity(60)
+            .into();
+        let ansi_red: ColorU = appearance.theme().terminal_colors().bright.red.into();
+
+        struct StatusContent {
+            text: String,
+            color: ColorU,
+        }
+        struct CallToActionContent {
+            text: String,
+            action: MainPageAction,
+        }
+
+        let (status_content, call_to_action_content) = match GithubUpdateState::as_ref(app) {
+            GithubUpdateState::Idle => (
+                None,
+                Some(CallToActionContent {
+                    text: warp_i18n::t!("settings-account-check-for-updates"),
+                    action: MainPageAction::CheckGithubUpdate,
+                }),
+            ),
+            GithubUpdateState::Checking => (
+                Some(StatusContent {
+                    text: warp_i18n::t!("settings-account-checking-for-update"),
+                    color: faded_text_color,
+                }),
+                None,
+            ),
+            GithubUpdateState::UpToDate => (
+                Some(StatusContent {
+                    text: warp_i18n::t!("settings-account-up-to-date"),
+                    color: faded_text_color,
+                }),
+                Some(CallToActionContent {
+                    text: warp_i18n::t!("settings-account-check-for-updates"),
+                    action: MainPageAction::CheckGithubUpdate,
+                }),
+            ),
+            GithubUpdateState::UpdateAvailable { tag, html_url } => (
+                Some(StatusContent {
+                    text: warp_i18n::t!(
+                        "settings-account-update-available-version",
+                        version = tag.as_str()
+                    ),
+                    color: ansi_red,
+                }),
+                Some(CallToActionContent {
+                    text: warp_i18n::t!("settings-account-open-on-github"),
+                    action: MainPageAction::OpenUrl(html_url.clone()),
+                }),
+            ),
+            GithubUpdateState::Error => (
+                Some(StatusContent {
+                    text: warp_i18n::t!("settings-account-update-check-failed"),
+                    color: ansi_red,
+                }),
+                Some(CallToActionContent {
+                    text: warp_i18n::t!("settings-account-check-for-updates"),
+                    action: MainPageAction::CheckGithubUpdate,
+                }),
+            ),
+        };
+
+        let mut first_row = Flex::row()
+            .with_cross_axis_alignment(CrossAxisAlignment::Start)
+            .with_child(
+                Shrinkable::new(
+                    1.0,
+                    Align::new(
+                        Text::new_inline(
+                            warp_i18n::t!("settings-account-version"),
+                            appearance.ui_font_family(),
+                            REGULAR_TEXT_FONT_SIZE,
+                        )
+                        .with_color(faded_text_color)
+                        .finish(),
+                    )
+                    .left()
+                    .finish(),
+                )
+                .finish(),
+            );
+        if let Some(call_to_action_content) = call_to_action_content {
+            first_row.add_child(
+                appearance
+                    .ui_builder()
+                    .link(
+                        call_to_action_content.text.into(),
+                        None,
+                        Some(Box::new(move |ctx| {
+                            ctx.dispatch_typed_action(call_to_action_content.action.clone());
+                        })),
+                        self.version_info_cta_link_mouse_state.clone(),
+                    )
+                    .soft_wrap(false)
+                    .build()
+                    .finish(),
+            );
+        }
+
+        let mut second_row = Flex::row()
+            .with_cross_axis_alignment(CrossAxisAlignment::Start)
+            .with_child(
+                Shrinkable::new(
+                    1.0,
+                    Align::new(
+                        Flex::row()
+                            .with_cross_axis_alignment(CrossAxisAlignment::Start)
+                            .with_child(
+                                appearance
+                                    .ui_builder()
+                                    .copy_button(16., self.copy_version_button_mouse_state.clone())
+                                    .build()
+                                    .with_cursor(Cursor::PointingHand)
+                                    .on_click(move |ctx, _, _| {
+                                        ctx.dispatch_typed_action(WorkspaceAction::CopyVersion(
+                                            version,
+                                        ));
+                                    })
+                                    .finish(),
+                            )
+                            .with_child(
+                                Container::new(
+                                    Text::new_inline(
+                                        version.to_string(),
+                                        appearance.ui_font_family(),
+                                        REGULAR_TEXT_FONT_SIZE,
+                                    )
+                                    .with_color(appearance.theme().active_ui_text_color().into())
+                                    .finish(),
+                                )
+                                .with_margin_left(8.)
+                                .finish(),
+                            )
+                            .finish(),
+                    )
+                    .left()
+                    .finish(),
+                )
+                .finish(),
+            );
+        if let Some(status_content) = status_content {
+            second_row.add_child(
+                Text::new_inline(
+                    status_content.text.to_string(),
+                    appearance.ui_font_family(),
+                    REGULAR_TEXT_FONT_SIZE,
+                )
+                .with_color(status_content.color)
+                .finish(),
+            );
+        }
+
+        let mut version_info = Flex::column();
+        version_info.add_child(first_row.finish());
+        version_info.add_child(
+            Container::new(second_row.finish())
+                .with_margin_top(5.)
+                .finish(),
+        );
+        version_info.finish()
+    }
+}
+
+impl SettingsWidget for GithubVersionInfoWidget {
+    type View = MainSettingsPageView;
+
+    fn search_terms(&self) -> &str {
+        "version update github"
+    }
+
+    fn render(
+        &self,
+        _view: &Self::View,
+        appearance: &Appearance,
+        app: &AppContext,
+    ) -> Box<dyn Element> {
+        let version = ChannelState::app_version()
+            .unwrap_or(concat!(env!("CARGO_PKG_VERSION"), "-dev"));
+        Container::new(self.render_version_info(version, appearance, app))
+            .with_margin_top(VERTICAL_MARGIN)
+            .finish()
     }
 }
 
