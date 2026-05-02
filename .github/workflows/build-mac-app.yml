@@ -101,6 +101,27 @@ jobs:
       - name: Install cargo-about (license generation)
         run: cargo install --locked cargo-about@0.8.4
 
+      # 自托管 macOS runner 在 launchd 服务上下文下 find 得到 login.keychain 的
+      # Apple Development cert（returns metadata），但用不了它的私钥（errSecInternalComponent，
+      # 因为 launchd agent 无法解锁用户 keychain）。
+      # 解决：把当前用户的 keychain search list 临时切到一个空 keychain，
+      # 让 script/macos/bundle 里的 `security find-identity` 返回 0 个 identity，
+      # selfsign 分支自动 fall through 到 ad-hoc 签名（SIGNING_CERT="-"）。
+      # 免费 macos-14 runner 不需要这步因为本来就没装 cert。
+      - name: Force ad-hoc signing on self-hosted runner
+        if: ${{ runner.environment != 'github-hosted' }}
+        run: |
+          set -eu
+          BUILD_KC=/tmp/warp-build-empty.keychain-db
+          security delete-keychain "$BUILD_KC" 2>/dev/null || true
+          security create-keychain -p "" "$BUILD_KC"
+          # 备份原 search list 以便后面恢复
+          security list-keychains -d user > /tmp/warp-build-prev-keychains.txt
+          security list-keychains -d user -s "$BUILD_KC"
+          echo "::group::find-identity after switch (should be empty)"
+          security find-identity -p codesigning -v || true
+          echo "::endgroup::"
+
       - name: Build & bundle
         id: bundle
         # --selfsign 会用本地 Apple Development 证书自签；运行时找不到证书时回退到 ad-hoc 签名，
@@ -155,3 +176,14 @@ jobs:
           path: ${{ steps.paths.outputs.out_dir }}/app-bundle.zip
           if-no-files-found: error
           retention-days: 14
+
+      # 把 keychain search list 还原成原样，避免后续在同一 runner 上的其他工作流受影响。
+      - name: Restore keychain search list
+        if: ${{ always() && runner.environment != 'github-hosted' }}
+        run: |
+          if [ -f /tmp/warp-build-prev-keychains.txt ]; then
+            # 把每行（被引号括着的路径）拼成 -s 的 N 个参数。
+            xargs -a /tmp/warp-build-prev-keychains.txt security list-keychains -d user -s
+            rm /tmp/warp-build-prev-keychains.txt
+          fi
+          security delete-keychain /tmp/warp-build-empty.keychain-db 2>/dev/null || true
