@@ -137,7 +137,7 @@ impl UndoCloseView {
             .with_child(
                 Container::new(
                     Text::new_inline(
-                        "Grace period (seconds)",
+                        warp_i18n::t!("settings-features-grace-period"),
                         appearance.ui_font_family(),
                         appearance.ui_font_size(),
                     )
@@ -178,7 +178,7 @@ impl View for UndoCloseView {
         let mut column = Flex::column()
             .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
             .with_child(render_body_item::<Action>(
-                "Enable reopening of closed sessions".into(),
+                warp_i18n::t!("settings-features-enable-reopen-sessions"),
                 None,
                 LocalOnlyIconState::for_setting(
                     UndoCloseEnabled::storage_key(),

@@ -713,9 +713,7 @@ fn block_maximum_rows_description() -> String {
         "1 million"
     };
 
-    format!(
-        "Setting the limit above 100k lines may impact performance. Maximum rows supported is {max_rows}."
-    )
+    warp_i18n::t!("settings-features-max-block-rows-desc", max_rows = max_rows)
 }
 
 fn to_string(b: bool) -> String {
@@ -7272,3 +7270,4 @@ impl SettingsWidget for GraphicsBackendWidget {
         col.finish()
     }
 }
+

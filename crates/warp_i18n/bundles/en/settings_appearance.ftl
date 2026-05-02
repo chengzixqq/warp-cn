@@ -30,12 +30,19 @@ settings-appearance-fullscreen-apps = Full-screen Apps
 # Theme & icon
 settings-appearance-create-custom-theme = Create your own custom theme
 settings-appearance-sync-with-os = Sync with OS
+settings-appearance-sync-with-os-desc = Automatically switch between light and dark themes when your system does.
+settings-appearance-current-theme = Current theme
+settings-appearance-icon = Icon
 settings-appearance-customize-app-icon = Customize your app icon
 settings-appearance-restart-icon-hint = You may need to restart Warp for MacOS to apply the preferred icon style.
 
 # Window
 settings-appearance-custom-window-size = Open new windows with custom size
 settings-appearance-window-opacity = Window Opacity:
+settings-appearance-window-opacity-value = Window Opacity: {$value}
+settings-appearance-window-blur-radius = Window Blur Radius: {$value}
+settings-appearance-zoom = Zoom
+settings-appearance-zoom-desc = Adjusts the default zoom level across all windows
 settings-appearance-transparency-not-supported = Transparency is not supported with your graphics drivers.
 settings-appearance-graphics-no-transparent = The selected graphics settings may not support rendering transparent windows.
 settings-appearance-use-window-blur = Use Window Blur (Acrylic texture)
@@ -65,7 +72,14 @@ settings-appearance-show-code-review-btn = Show code review button
 settings-appearance-preserve-tab-color = Preserve active tab color for new tabs
 settings-appearance-vertical-tab-layout = Use vertical tab layout
 settings-appearance-prompt-as-tab-title = Use latest user prompt as conversation title in tab names
+settings-appearance-prompt-as-tab-title-desc = Show the latest user prompt instead of the generated conversation title for Oz and third-party agent sessions in vertical tabs.
+settings-appearance-show-vtabs-restored = Show vertical tabs panel in restored windows
+settings-appearance-show-vtabs-restored-desc = When enabled, reopening or restoring a window opens the vertical tabs panel even if it was closed when the window was last saved.
 settings-appearance-header-toolbar-layout = Header toolbar layout
+settings-appearance-available-items = Available items
+settings-appearance-restore-default = Restore default
+settings-appearance-left-side = Left side
+settings-appearance-right-side = Right side
 settings-appearance-show-tab-bar = Show the tab bar
 settings-appearance-custom-alt-screen-padding = Use custom padding in alt-screen
 

@@ -1250,7 +1250,8 @@ impl SettingsWidget for GithubVersionInfoWidget {
         appearance: &Appearance,
         app: &AppContext,
     ) -> Box<dyn Element> {
-        let version = ChannelState::app_version()
+        let version: &str = ChannelState::app_version()
+            .or(option_env!("GIT_RELEASE_TAG"))
             .unwrap_or(concat!(env!("CARGO_PKG_VERSION"), "-dev"));
         Container::new(self.render_version_info(version, appearance, app))
             .with_margin_top(VERTICAL_MARGIN)

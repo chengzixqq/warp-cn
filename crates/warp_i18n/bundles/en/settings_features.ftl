@@ -58,6 +58,12 @@ settings-features-linux-selection-clipboard = Honor linux selection clipboard
 settings-features-wayland-window-management = Use Wayland for window management
 settings-features-graphics-backend = Preferred graphics backend
 settings-features-make-default-terminal = Make Warp the default terminal
+settings-features-max-block-rows-desc = Setting the limit above 100k lines may impact performance. Maximum rows supported is {$max_rows}.
+settings-features-enable-reopen-sessions = Enable reopening of closed sessions
+settings-features-grace-period = Grace period (seconds)
+settings-features-wd-home-dir = Home directory
+settings-features-wd-previous-session = Previous session's directory
+settings-features-wd-custom-dir = Custom directory
 
 # Category headers
 settings-features-cat-general = General

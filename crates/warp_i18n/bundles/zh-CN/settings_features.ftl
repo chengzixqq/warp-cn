@@ -58,6 +58,12 @@ settings-features-linux-selection-clipboard = 遵循 Linux 选区剪贴板
 settings-features-wayland-window-management = 使用 Wayland 进行窗口管理
 settings-features-graphics-backend = 首选图形后端
 settings-features-make-default-terminal = 将 Warp 设为默认终端
+settings-features-max-block-rows-desc = 将限制设置为超过 10 万行可能会影响性能。支持的最大行数为{$max_rows}。
+settings-features-enable-reopen-sessions = 启用重新打开已关闭的会话
+settings-features-grace-period = 宽限期（秒）
+settings-features-wd-home-dir = 主目录
+settings-features-wd-previous-session = 上一个会话的目录
+settings-features-wd-custom-dir = 自定义目录
 
 # 分组标题
 settings-features-cat-general = 通用

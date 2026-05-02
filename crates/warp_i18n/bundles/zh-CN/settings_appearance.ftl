@@ -30,12 +30,19 @@ settings-appearance-fullscreen-apps = 全屏应用
 # 主题 & 图标
 settings-appearance-create-custom-theme = 创建你的自定义主题
 settings-appearance-sync-with-os = 跟随系统
+settings-appearance-sync-with-os-desc = 当系统切换时，自动在明亮和暗黑主题之间切换。
+settings-appearance-current-theme = 当前主题
+settings-appearance-icon = 图标
 settings-appearance-customize-app-icon = 自定义应用图标
 settings-appearance-restart-icon-hint = 你可能需要重启 Warp 才能让 macOS 应用所选图标样式。
 
 # 窗口
 settings-appearance-custom-window-size = 以自定义尺寸打开新窗口
 settings-appearance-window-opacity = 窗口不透明度：
+settings-appearance-window-opacity-value = 窗口不透明度：{$value}
+settings-appearance-window-blur-radius = 窗口模糊半径：{$value}
+settings-appearance-zoom = 缩放
+settings-appearance-zoom-desc = 调整所有窗口的默认缩放级别
 settings-appearance-transparency-not-supported = 你的图形驱动不支持透明效果。
 settings-appearance-graphics-no-transparent = 当前图形设置可能不支持渲染透明窗口。
 settings-appearance-use-window-blur = 使用窗口模糊（亚克力质感）
@@ -65,7 +72,14 @@ settings-appearance-show-code-review-btn = 显示代码评审按钮
 settings-appearance-preserve-tab-color = 新标签保留活动标签颜色
 settings-appearance-vertical-tab-layout = 使用纵向标签布局
 settings-appearance-prompt-as-tab-title = 使用最近用户提示词作为标签名中的会话标题
+settings-appearance-prompt-as-tab-title-desc = 在纵向标签中，为 Oz 和第三方智能体会话显示最新的用户提示词，而非自动生成的会话标题。
+settings-appearance-show-vtabs-restored = 在恢复的窗口中显示纵向标签面板
+settings-appearance-show-vtabs-restored-desc = 启用后，重新打开或恢复窗口时会显示纵向标签面板，即使该面板在上次保存窗口时已关闭。
 settings-appearance-header-toolbar-layout = 头部工具栏布局
+settings-appearance-available-items = 可用项目
+settings-appearance-restore-default = 恢复默认
+settings-appearance-left-side = 左侧
+settings-appearance-right-side = 右侧
 settings-appearance-show-tab-bar = 显示标签栏
 settings-appearance-custom-alt-screen-padding = 在 alt-screen 中使用自定义内边距
 

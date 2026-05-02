@@ -68,3 +68,11 @@ settings-code-project-explorer = Project explorer
 settings-code-project-explorer-desc = Adds an IDE-style project explorer / file tree to the left side tools panel.
 settings-code-global-search = Global file search
 settings-code-global-search-desc = Adds global file search to the left side tools panel.
+
+# External editor
+settings-code-choose-editor-file-links = Choose an editor to open file links
+settings-code-choose-editor-code-panels = Choose an editor to open files from the code review panel, project explorer, and global search
+settings-code-choose-layout = Choose a layout to open files in Warp
+settings-code-group-files-header = Group files into single editor pane
+settings-code-group-files-desc = When this setting is on, any files opened in the same tab will be automatically grouped into a single editor pane.
+settings-code-open-markdown-viewer = Open Markdown files in Warp's Markdown Viewer by default

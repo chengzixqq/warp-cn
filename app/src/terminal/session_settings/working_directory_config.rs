@@ -41,11 +41,13 @@ pub enum WorkingDirectoryMode {
 impl WorkingDirectoryMode {
     /// Returns the label that should be used for this mode when configuring
     /// values in the settings view.
-    pub fn dropdown_item_label(&self) -> &'static str {
+    pub fn dropdown_item_label(&self) -> String {
         match self {
-            WorkingDirectoryMode::HomeDir => "Home directory",
-            WorkingDirectoryMode::PreviousDir => "Previous session's directory",
-            WorkingDirectoryMode::CustomDir => "Custom directory",
+            WorkingDirectoryMode::HomeDir => warp_i18n::t!("settings-features-wd-home-dir"),
+            WorkingDirectoryMode::PreviousDir => {
+                warp_i18n::t!("settings-features-wd-previous-session")
+            }
+            WorkingDirectoryMode::CustomDir => warp_i18n::t!("settings-features-wd-custom-dir"),
         }
     }
 }

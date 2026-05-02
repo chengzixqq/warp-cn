@@ -25,8 +25,12 @@ use crate::{
     view_components::{Dropdown, DropdownItem},
 };
 
-const TABBED_FILE_VIEWER_TOGGLE_HEADER: &str = "Group files into single editor pane";
-const TABBED_FILE_VIEWER_TOGGLE_DESCRIPTION: &str = "When this setting is on, any files opened in the same tab will be automatically grouped into a single editor pane.";
+fn tabbed_file_viewer_toggle_header() -> String {
+    warp_i18n::t!("settings-code-group-files-header")
+}
+fn tabbed_file_viewer_toggle_description() -> String {
+    warp_i18n::t!("settings-code-group-files-desc")
+}
 
 #[derive(Debug, Clone)]
 pub enum ExternalEditorAction {
@@ -280,7 +284,7 @@ impl View for ExternalEditorView {
 
         let default_editor = render_dropdown_item(
             appearance,
-            "Choose an editor to open file links",
+            &warp_i18n::t!("settings-code-choose-editor-file-links"),
             None,
             None,
             LocalOnlyIconState::for_setting(
@@ -295,7 +299,7 @@ impl View for ExternalEditorView {
 
         let code_panels_editor = render_dropdown_item(
             appearance,
-            "Choose an editor to open files from the code review panel, project explorer, and global search",
+            &warp_i18n::t!("settings-code-choose-editor-code-panels"),
             None,
             None,
             LocalOnlyIconState::for_setting(
@@ -310,7 +314,7 @@ impl View for ExternalEditorView {
 
         let default_layout = render_dropdown_item(
             appearance,
-            "Choose a layout to open files in Warp",
+            &warp_i18n::t!("settings-code-choose-layout"),
             None,
             None,
             LocalOnlyIconState::for_setting(
@@ -330,7 +334,7 @@ impl View for ExternalEditorView {
 
         if FeatureFlag::TabbedEditorView.is_enabled() {
             column.add_child(render_body_item::<ExternalEditorAction>(
-                TABBED_FILE_VIEWER_TOGGLE_HEADER.into(),
+                tabbed_file_viewer_toggle_header(),
                 None,
                 LocalOnlyIconState::for_setting(
                     PreferTabbedEditorView::storage_key(),
@@ -353,12 +357,12 @@ impl View for ExternalEditorView {
                         ctx.dispatch_typed_action(ExternalEditorAction::ToggleTabbedEditorView);
                     })
                     .finish(),
-                Some(TABBED_FILE_VIEWER_TOGGLE_DESCRIPTION.into()),
+                Some(tabbed_file_viewer_toggle_description()),
             ));
         }
 
         column.add_child(render_body_item::<ExternalEditorAction>(
-            "Open Markdown files in Warp's Markdown Viewer by default".to_string(),
+            warp_i18n::t!("settings-code-open-markdown-viewer"),
             Some(AdditionalInfo {
                 mouse_state: self.markdown_viewer_mouse_state.clone(),
                 on_click_action: Some(ExternalEditorAction::OpenUrl(

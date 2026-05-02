@@ -68,3 +68,11 @@ settings-code-project-explorer = 项目浏览器
 settings-code-project-explorer-desc = 在左侧工具面板加入 IDE 风格的项目浏览器 / 文件树。
 settings-code-global-search = 全局文件搜索
 settings-code-global-search-desc = 在左侧工具面板加入全局文件搜索。
+
+# 外部编辑器
+settings-code-choose-editor-file-links = 选择打开文件链接的编辑器
+settings-code-choose-editor-code-panels = 选择从代码审查面板、项目浏览器和全局搜索打开文件的编辑器
+settings-code-choose-layout = 选择在 Warp 中打开文件的布局
+settings-code-group-files-header = 将文件归组到单个编辑器窗格
+settings-code-group-files-desc = 启用后，在同一标签页中打开的文件将自动归组到单个编辑器窗格。
+settings-code-open-markdown-viewer = 默认在 Warp 的 Markdown 查看器中打开 Markdown 文件
