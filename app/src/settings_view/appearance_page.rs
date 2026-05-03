@@ -6,8 +6,9 @@ use super::settings_page::{
 use super::{flags, SettingsSection};
 use super::{
     settings_page::{
-        build_reset_button, render_body_item, render_body_item_label, render_dropdown_item, render_dropdown_item_label,
-        SettingsPageEvent, SettingsPageMeta, SettingsPageViewHandle, ToggleState, HEADER_PADDING,
+        build_reset_button, render_body_item, render_body_item_label, render_dropdown_item,
+        render_dropdown_item_label, SettingsPageEvent, SettingsPageMeta, SettingsPageViewHandle,
+        ToggleState, HEADER_PADDING,
     },
     SettingsAction,
 };
@@ -3133,9 +3134,11 @@ impl SettingsWidget for WindowOpacityWidget {
         }
 
         let opacity_value = *window_settings.background_opacity;
-        let opacity_str = opacity_value.to_string();
         let mut col = Flex::column().with_child(render_body_item::<AppearancePageAction>(
-            warp_i18n::t!("settings-appearance-window-opacity-value", value = opacity_str.as_str()),
+            warp_i18n::t!(
+                "settings-appearance-window-opacity-value",
+                value = opacity_value.to_string()
+            ),
             // TODO(CORE-3384) add AdditionalInfo here.
             None,
             LocalOnlyIconState::for_setting(
@@ -3171,9 +3174,8 @@ impl SettingsWidget for WindowOpacityWidget {
             // Skip showing the warning for OpenGL since WGPU often incorrectly reports it as not
             // supporting alpha.
             if !window.supports_transparency() && window.graphics_backend() != GraphicsBackend::Gl {
-                let mut message: Cow<'_, str> = Cow::Owned(
-                    warp_i18n::t!("settings-appearance-graphics-no-transparent"),
-                );
+                let mut message: Cow<'_, str> =
+                    Cow::Owned(warp_i18n::t!("settings-appearance-graphics-no-transparent"));
                 let gpu_settings = GPUSettings::as_ref(app);
                 if (gpu_settings
                     .prefer_low_power_gpu
@@ -3229,7 +3231,6 @@ impl SettingsWidget for WindowBlurWidget {
     ) -> Box<dyn Element> {
         let window_settings = WindowSettings::as_ref(app);
         let blur_value = *window_settings.background_blur_radius;
-        let blur_str = blur_value.to_string();
         let label_info = AdditionalInfo {
             mouse_state: self.info_button.clone(),
             on_click_action: Some(AppearancePageAction::OpenUrl(
@@ -3241,7 +3242,10 @@ impl SettingsWidget for WindowBlurWidget {
 
         Flex::column()
             .with_child(render_body_item::<AppearancePageAction>(
-                warp_i18n::t!("settings-appearance-window-blur-radius", value = blur_str.as_str()),
+                warp_i18n::t!(
+                    "settings-appearance-window-blur-radius",
+                    value = blur_value.to_string()
+                ),
                 Some(label_info),
                 LocalOnlyIconState::for_setting(
                     BackgroundBlurRadius::storage_key(),
@@ -4721,7 +4725,9 @@ impl SettingsWidget for ShowVerticalTabPanelInRestoredWindowsWidget {
                     );
                 })
                 .finish(),
-            Some(warp_i18n::t!("settings-appearance-show-vtabs-restored-desc")),
+            Some(warp_i18n::t!(
+                "settings-appearance-show-vtabs-restored-desc"
+            )),
         )
     }
 }
