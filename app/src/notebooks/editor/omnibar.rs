@@ -455,12 +455,12 @@ impl TypedActionView for Omnibar {
                 ))
             }
             OmnibarAction::OpenLinkEditor => ActionAccessibilityContent::from_debug(),
-            OmnibarAction::UnstyleLink => ActionAccessibilityContent::Custom(
-                AccessibilityContent::new_without_help(
+            OmnibarAction::UnstyleLink => {
+                ActionAccessibilityContent::Custom(AccessibilityContent::new_without_help(
                     warp_i18n::t!("a11y-omnibar-remove-link").to_string(),
                     WarpA11yRole::UserAction,
-                ),
-            ),
+                ))
+            }
         }
     }
 }
