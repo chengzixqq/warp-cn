@@ -257,6 +257,11 @@ block.workspace = true
 cocoa.workspace = true
 core-foundation.workspace = true
 mach2 = "0.5"
+# Pure-Rust minisign signature verification (no signing). Used by the
+# github_update installer to authenticate downloaded release tarballs
+# against the build-time-baked WARP_UPDATE_PUBKEY before replacing the
+# running .app bundle. macOS-only because the installer is macOS-only.
+minisign-verify = "0.2"
 objc.workspace = true
 objc2-foundation = { workspace = true, features = ["NSBundle"] }
 permissions = "0.4.1"

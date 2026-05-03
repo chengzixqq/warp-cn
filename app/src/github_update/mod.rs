@@ -1,31 +1,76 @@
-//! Lightweight update checker against the fork's GitHub Releases.
+//! Update checker + installer against the fork's GitHub Releases.
 //!
 //! Independent from `crate::autoupdate` (which talks to warp.dev's release
-//! infrastructure and is unreachable on a fork). Powers only the Settings
-//! page Version row: shows current version, lets the user query the
-//! latest release on `Heartcoolman/warp-cn`, and routes the "open release"
-//! click to the browser. No download, no install.
+//! infrastructure and is unreachable on a fork). Drives the Settings page
+//! Version row:
+//!   * Shows current version.
+//!   * Polls the latest release on `Heartcoolman/warp-cn`.
+//!   * Lets the user trigger an in-place download/verify/extract/replace
+//!     pipeline (see [`install`]) when the release publishes a signed
+//!     tarball + `.minisig`. Falls back to "Open on GitHub" otherwise.
+//!
+//! Auto-update path is macOS-only; on other targets the install module is
+//! not compiled.
 
-use anyhow::{Context as _, Result, anyhow, bail};
-use serde::Deserialize;
+use anyhow::{anyhow, bail, Context as _, Result};
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use warp_core::channel::ChannelState;
+use warp_core::paths;
 use warpui::{AppContext, Entity, SingletonEntity};
 
-const REPO_API_URL: &str =
-    "https://api.github.com/repos/Heartcoolman/warp-cn/releases/latest";
+#[cfg(target_os = "macos")]
+mod install;
+
+const REPO_API_URL: &str = "https://api.github.com/repos/Heartcoolman/warp-cn/releases/latest";
 const REPO_RELEASES_URL: &str = "https://github.com/Heartcoolman/warp-cn/releases";
+const REPO_TAGS_API: &str =
+    "https://api.github.com/repos/Heartcoolman/warp-cn/git/matching-refs/tags/";
+const REPO_GIT_TAGS_API: &str = "https://api.github.com/repos/Heartcoolman/warp-cn/git/tags/";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const USER_AGENT: &str = "warp-cn-update-check/0.1";
 const ACCEPT_HEADER: &str = "application/vnd.github+json";
+/// Cache lifetime for SHA→tag resolution. SHA→tag is stable unless the user
+/// retags the same commit; 24h re-validation is the right balance for honoring
+/// retags without burning the GitHub unauthenticated rate budget (60/h/IP).
+const VERSION_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+const VERSION_CACHE_FILE: &str = "version_resolution.json";
+
+/// Carrier for a release that has both an installable tarball and its
+/// minisign signature. Surfacing this as `Some(_)` from a check tells the
+/// UI it can offer "Download & Install"; `None` means fall back to the
+/// browser link.
+#[derive(Clone, Debug)]
+pub struct InstallableRelease {
+    pub tag: String,
+    pub asset_url: String,
+    pub sig_url: String,
+}
 
 #[derive(Clone, Debug)]
 pub enum GithubUpdateState {
     Idle,
     Checking,
     UpToDate,
-    UpdateAvailable { tag: String, html_url: String },
+    UpdateAvailable {
+        tag: String,
+        html_url: String,
+        installable: Option<InstallableRelease>,
+    },
+    /// Tarball is being fetched + verified. UI shows an indeterminate spinner;
+    /// granular progress is intentionally deferred — release tarballs are
+    /// small (~50-150 MB) and the operation completes in seconds on a normal
+    /// connection.
+    Downloading {
+        tag: String,
+    },
+    /// Verification done; about to swap and relaunch. The current process
+    /// will `exit(0)` very shortly after entering this state, so the user
+    /// rarely sees this frame.
+    Installing {
+        tag: String,
+    },
     Error,
 }
 
@@ -38,32 +83,88 @@ impl GithubUpdateState {
         ctx.add_singleton_model(|_ctx| Self::new());
     }
 
+    /// True iff the binary was built with a baked update public key. UI uses
+    /// this to decide whether to surface the install button at all; the
+    /// install module enforces the same check defensively before applying.
+    pub fn install_supported() -> bool {
+        cfg!(target_os = "macos")
+            && option_env!("WARP_UPDATE_PUBKEY").is_some_and(|s| !s.is_empty())
+    }
+
     pub fn trigger_check(ctx: &mut AppContext) {
         Self::handle(ctx).update(ctx, |state, ctx| {
-            if matches!(state, Self::Checking) {
+            if matches!(
+                state,
+                Self::Checking | Self::Downloading { .. } | Self::Installing { .. }
+            ) {
                 return;
             }
 
             *state = Self::Checking;
             ctx.notify();
 
+            ctx.spawn(async { check_for_update().await }, |state, result, ctx| {
+                *state = match result {
+                    Ok(CheckResult::UpToDate) => Self::UpToDate,
+                    Ok(CheckResult::UpdateAvailable {
+                        tag,
+                        html_url,
+                        installable,
+                    }) => Self::UpdateAvailable {
+                        tag,
+                        html_url,
+                        installable,
+                    },
+                    Err(err) => {
+                        log::warn!("GitHub update check failed: {err:#}");
+                        Self::Error
+                    }
+                };
+                ctx.notify();
+            });
+        });
+    }
+
+    /// Kick off the download/verify/extract/replace pipeline. macOS-only;
+    /// no-ops on other platforms (and the install button is hidden).
+    #[cfg(target_os = "macos")]
+    pub fn trigger_install(ctx: &mut AppContext, target: InstallableRelease) {
+        Self::handle(ctx).update(ctx, |state, ctx| {
+            if matches!(state, Self::Downloading { .. } | Self::Installing { .. }) {
+                return;
+            }
+            let tag = target.tag.clone();
+            *state = Self::Downloading { tag: tag.clone() };
+            ctx.notify();
+
+            let install_target = target.clone();
             ctx.spawn(
-                async { check_for_update().await },
-                |state, result, ctx| {
-                    *state = match result {
-                        Ok(CheckResult::UpToDate) => Self::UpToDate,
-                        Ok(CheckResult::UpdateAvailable { tag, html_url }) => {
-                            Self::UpdateAvailable { tag, html_url }
+                async move { install::run_install(install_target).await },
+                move |state, result, ctx| {
+                    match result {
+                        Ok(()) => {
+                            // run_install returns Ok only if the helper has
+                            // already been spawned and we are seconds away
+                            // from process exit. Surface the transient
+                            // Installing state so the UI can swap to a
+                            // "Relaunching..." label.
+                            *state = Self::Installing { tag: tag.clone() };
                         }
                         Err(err) => {
-                            log::warn!("GitHub update check failed: {err:#}");
-                            Self::Error
+                            log::error!("GitHub update install failed: {err:#}");
+                            *state = Self::Error;
                         }
-                    };
+                    }
                     ctx.notify();
                 },
             );
         });
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn trigger_install(_ctx: &mut AppContext, _target: InstallableRelease) {
+        // No-op outside macOS; the UI does not surface the install button
+        // on other platforms.
     }
 }
 
@@ -81,7 +182,11 @@ impl SingletonEntity for GithubUpdateState {}
 
 enum CheckResult {
     UpToDate,
-    UpdateAvailable { tag: String, html_url: String },
+    UpdateAvailable {
+        tag: String,
+        html_url: String,
+        installable: Option<InstallableRelease>,
+    },
 }
 
 #[derive(Deserialize)]
@@ -90,6 +195,37 @@ struct GithubRelease {
     html_url: Option<String>,
     #[serde(default)]
     prerelease: bool,
+    #[serde(default)]
+    assets: Vec<ReleaseAsset>,
+}
+
+#[derive(Deserialize)]
+struct ReleaseAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+/// Picks the tarball + matching `.minisig` from a release's asset list.
+/// Returns `None` (and the UI falls back to the browser link) if either
+/// piece is missing — older releases predate the auto-update pipeline,
+/// and a release with the tarball but no signature is treated identically:
+/// without the signature we cannot verify integrity, so we refuse to
+/// auto-install.
+fn select_installable(tag: &str, assets: &[ReleaseAsset]) -> Option<InstallableRelease> {
+    if !GithubUpdateState::install_supported() {
+        return None;
+    }
+    let tarball = assets
+        .iter()
+        .find(|a| a.name.ends_with(".tar.gz") && !a.name.ends_with(".tar.gz.minisig"))?;
+    let sig = assets
+        .iter()
+        .find(|a| a.name == format!("{}.minisig", tarball.name))?;
+    Some(InstallableRelease {
+        tag: tag.to_string(),
+        asset_url: tarball.browser_download_url.clone(),
+        sig_url: sig.browser_download_url.clone(),
+    })
 }
 
 async fn check_for_update() -> Result<CheckResult> {
@@ -138,15 +274,24 @@ async fn check_for_update() -> Result<CheckResult> {
     let latest = ParsedGithubVersion::parse(&tag)
         .with_context(|| format!("Failed to parse latest GitHub release tag {tag}"))?;
 
+    let installable = select_installable(&tag, &release.assets);
+
     let current_version = ChannelState::app_version().or(option_env!("GIT_RELEASE_TAG"));
     match current_version {
-        None => Ok(CheckResult::UpdateAvailable { tag, html_url }),
+        None => Ok(CheckResult::UpdateAvailable {
+            tag,
+            html_url,
+            installable,
+        }),
         Some(current_tag) => {
-            let current = ParsedGithubVersion::parse(current_tag).with_context(|| {
-                format!("Failed to parse current version tag {current_tag}")
-            })?;
+            let current = ParsedGithubVersion::parse(current_tag)
+                .with_context(|| format!("Failed to parse current version tag {current_tag}"))?;
             if latest.cmp_numeric(&current) == Ordering::Greater {
-                Ok(CheckResult::UpdateAvailable { tag, html_url })
+                Ok(CheckResult::UpdateAvailable {
+                    tag,
+                    html_url,
+                    installable,
+                })
             } else {
                 Ok(CheckResult::UpToDate)
             }
@@ -258,6 +403,192 @@ fn read_gh_cli_token() -> Option<String> {
         .as_str()
         .filter(|s| !s.is_empty())
         .map(String::from)
+}
+
+// =============================================================================
+// SHA → tag reverse resolution (lets a retag fix a stale version without a
+// rebuild or repackage). Triggered once at app startup; falls back silently to
+// whatever ChannelState::app_version() already holds (plist or option_env).
+// =============================================================================
+
+#[derive(Deserialize)]
+struct GitRef {
+    #[serde(rename = "ref")]
+    ref_name: String,
+    object: GitRefObject,
+}
+
+#[derive(Deserialize)]
+struct GitRefObject {
+    sha: String,
+    #[serde(rename = "type")]
+    obj_type: String,
+}
+
+#[derive(Deserialize)]
+struct GitTagObject {
+    object: GitTagInner,
+}
+
+#[derive(Deserialize)]
+struct GitTagInner {
+    sha: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct VersionCache {
+    sha: String,
+    tag: String,
+    ts: u64,
+}
+
+/// Triggers a one-shot SHA→tag resolution against the fork's GitHub Releases.
+/// Runs as a spawn on the GithubUpdateState entity (no state mutation; only
+/// `ctx.notify()` on success so the version row re-renders). Pure
+/// best-effort: any error (no SHA baked in, network down, rate limit, no
+/// matching tag) leaves the existing app_version untouched.
+/// Best-effort cleanup of the rollback `.previous` bundle left behind by a
+/// successful auto-update swap. Reaching this code path means the new
+/// version booted far enough to register singletons — i.e. the upgrade
+/// looks healthy — so the rollback copy is no longer needed.
+pub fn cleanup_previous_install() {
+    #[cfg(target_os = "macos")]
+    install::cleanup_previous();
+}
+
+pub fn trigger_app_version_resolve(ctx: &mut AppContext) {
+    let Some(sha) = option_env!("GIT_COMMIT_SHA") else {
+        return;
+    };
+    if sha.is_empty() {
+        return;
+    }
+    let sha = sha.to_string();
+    GithubUpdateState::handle(ctx).update(ctx, |_state, ctx| {
+        let _ = ctx.spawn(
+            async move { resolve_app_version_from_sha(&sha).await },
+            |_state, result, ctx| match result {
+                Ok(()) => ctx.notify(),
+                Err(err) => {
+                    log::debug!("github_update: app version resolve skipped: {err:#}");
+                }
+            },
+        );
+    });
+}
+
+async fn resolve_app_version_from_sha(sha: &str) -> Result<()> {
+    if let Some(cache) = read_version_cache() {
+        if cache.sha == sha && now_secs().saturating_sub(cache.ts) < VERSION_CACHE_TTL.as_secs() {
+            apply_resolved_tag(&cache.tag);
+            return Ok(());
+        }
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(REQUEST_TIMEOUT)
+        .build()
+        .context("Failed to construct reqwest client")?;
+
+    let refs: Vec<GitRef> = github_get(&client, REPO_TAGS_API)
+        .await
+        .context("Failed to list git refs")?;
+
+    for git_ref in &refs {
+        let commit_sha = match git_ref.object.obj_type.as_str() {
+            "commit" => git_ref.object.sha.clone(),
+            "tag" => match dereference_annotated_tag(&client, &git_ref.object.sha).await {
+                Ok(s) => s,
+                Err(err) => {
+                    log::debug!("dereference annotated tag failed: {err:#}");
+                    continue;
+                }
+            },
+            _ => continue,
+        };
+        if commit_sha != sha {
+            continue;
+        }
+        let tag = git_ref
+            .ref_name
+            .strip_prefix("refs/tags/")
+            .unwrap_or(&git_ref.ref_name)
+            .to_string();
+        if ParsedGithubVersion::parse(&tag).is_err() {
+            continue;
+        }
+        apply_resolved_tag(&tag);
+        if let Err(err) = write_version_cache(&VersionCache {
+            sha: sha.to_string(),
+            tag,
+            ts: now_secs(),
+        }) {
+            log::debug!("write version cache failed: {err:#}");
+        }
+        return Ok(());
+    }
+
+    bail!("no release-shaped tag points at {sha}");
+}
+
+async fn github_get<T: for<'de> Deserialize<'de>>(
+    client: &reqwest::Client,
+    url: &str,
+) -> Result<T> {
+    let mut request = client
+        .get(url)
+        .header(reqwest::header::USER_AGENT, USER_AGENT)
+        .header(reqwest::header::ACCEPT, ACCEPT_HEADER);
+    if let Some(token) = resolve_github_token() {
+        request = request.header(reqwest::header::AUTHORIZATION, format!("Bearer {token}"));
+    }
+    Ok(request
+        .send()
+        .await
+        .context("send")?
+        .error_for_status()
+        .context("status")?
+        .json()
+        .await
+        .context("json")?)
+}
+
+async fn dereference_annotated_tag(client: &reqwest::Client, tag_sha: &str) -> Result<String> {
+    let url = format!("{REPO_GIT_TAGS_API}{tag_sha}");
+    let obj: GitTagObject = github_get(client, &url).await?;
+    Ok(obj.object.sha)
+}
+
+fn apply_resolved_tag(tag: &str) {
+    let leaked: &'static str = Box::leak(tag.to_string().into_boxed_str());
+    ChannelState::set_app_version(Some(leaked));
+    log::info!("github_update: app_version resolved to {leaked} via SHA reverse lookup");
+}
+
+fn version_cache_path() -> std::path::PathBuf {
+    paths::cache_dir().join(VERSION_CACHE_FILE)
+}
+
+fn read_version_cache() -> Option<VersionCache> {
+    let bytes = std::fs::read(version_cache_path()).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+fn write_version_cache(cache: &VersionCache) -> Result<()> {
+    let path = version_cache_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).context("create cache dir")?;
+    }
+    let bytes = serde_json::to_vec(cache).context("serialize cache")?;
+    std::fs::write(&path, bytes).context("write cache")?;
+    Ok(())
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 #[cfg(test)]

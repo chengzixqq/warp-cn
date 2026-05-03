@@ -11,7 +11,6 @@ mod app_state;
 mod auth;
 mod autoupdate;
 mod banner;
-mod github_update;
 mod billing;
 mod changelog_model;
 mod chip_configurator;
@@ -40,6 +39,7 @@ mod experiments;
 mod external_secrets;
 #[cfg(target_family = "wasm")]
 mod font_fallback;
+mod github_update;
 mod global_resource_handles;
 mod gpu_state;
 mod input_classifier;
@@ -575,7 +575,10 @@ pub fn run() -> Result<()> {
     platform::init();
 
     if let Err(err) = warp_i18n::init(warp_i18n::Locale::DEFAULT) {
-        ::tracing::error!(?err, "warp_i18n::init failed; UI strings will render placeholders");
+        ::tracing::error!(
+            ?err,
+            "warp_i18n::init failed; UI strings will render placeholders"
+        );
     }
 
     // Ensure feature flags are initialized before parsing command-line arguments.
@@ -1801,6 +1804,16 @@ fn initialize_app(
 
     AutoupdateState::register(ctx, server_api.clone());
     crate::github_update::GithubUpdateState::register(ctx);
+    // Best-effort SHA→tag reverse resolution. If the bundle's WarpVersion
+    // plist value is wrong/missing, retagging the commit on GitHub will
+    // correct the displayed version on the next launch — no rebuild,
+    // no repackage. Silently no-ops when the binary lacks GIT_COMMIT_SHA
+    // (source tarballs) or the network/API is unavailable.
+    crate::github_update::trigger_app_version_resolve(ctx);
+    // Auto-update leaves a rollback copy at `<install>.app.previous` after
+    // a successful swap. Once the new bundle has booted to this point we
+    // can safely drop it; macOS-only and best-effort.
+    crate::github_update::cleanup_previous_install();
 
     ctx.add_singleton_model(LocalWorkflows::new);
 

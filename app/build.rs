@@ -25,11 +25,16 @@ fn main() -> Result<()> {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=.git/HEAD");
     println!("cargo:rerun-if-changed=.git/refs/tags");
+    println!("cargo:rerun-if-changed=../script/warp-update.pub");
     println!("cargo:rerun-if-env-changed=CARGO_CFG_TARGET_OS");
     println!("cargo:rerun-if-env-changed=CARGO_CFG_TARGET_FAMILY");
     println!("cargo:rerun-if-env-changed=GIT_RELEASE_TAG");
+    println!("cargo:rerun-if-env-changed=GIT_COMMIT_SHA");
+    println!("cargo:rerun-if-env-changed=WARP_UPDATE_PUBKEY");
 
     emit_git_release_tag_if_unset();
+    emit_git_commit_sha_if_unset();
+    emit_warp_update_pubkey_if_unset();
 
     let target_os = env::var("CARGO_CFG_TARGET_OS")?;
     let target_family = env::var("CARGO_CFG_TARGET_FAMILY")?;
@@ -232,6 +237,28 @@ fn generate_channel_config_if_needed(target_family: &str, target_os: &str) {
 /// the `app` crate to recompile on every local commit, which dwarfs the value
 /// of auto-detection during dev work. Use `cargo clean -p warp` or `touch
 /// app/build.rs` to refresh after retagging locally.
+/// Bakes the current commit SHA into the binary as `GIT_COMMIT_SHA`. Unlike
+/// `GIT_RELEASE_TAG`, this almost always succeeds (only fails on tarball-only
+/// source extracts with no `.git`), giving the runtime a stable handle that
+/// the `github_update` resolver uses to reverse-lookup the matching release
+/// tag via the GitHub API. That path lets us fix a tag mismatch by simply
+/// retagging the commit on GitHub — no rebuild, no repackage.
+fn emit_git_commit_sha_if_unset() {
+    if env::var("GIT_COMMIT_SHA").is_ok() {
+        return;
+    }
+    let Ok(output) = Command::new("git").args(["rev-parse", "HEAD"]).output() else {
+        return;
+    };
+    if !output.status.success() {
+        return;
+    }
+    let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !sha.is_empty() && sha.chars().all(|c| c.is_ascii_hexdigit()) {
+        println!("cargo:rustc-env=GIT_COMMIT_SHA={sha}");
+    }
+}
+
 fn emit_git_release_tag_if_unset() {
     if env::var("GIT_RELEASE_TAG").is_ok() {
         return;
@@ -252,12 +279,52 @@ fn emit_git_release_tag_if_unset() {
 }
 
 fn git_describe(args: &[&str]) -> Option<String> {
-    let output = Command::new("git").arg("describe").args(args).output().ok()?;
+    let output = Command::new("git")
+        .arg("describe")
+        .args(args)
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }
     let tag = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if tag.is_empty() { None } else { Some(tag) }
+    if tag.is_empty() {
+        None
+    } else {
+        Some(tag)
+    }
+}
+
+/// Bakes the minisign public key from `script/warp-update.pub` into the
+/// binary as `WARP_UPDATE_PUBKEY`. The github_update installer reads it via
+/// `option_env!` and refuses to apply an update if it is missing or empty —
+/// so a fork that hasn't run `script/generate_update_keys.sh` gets a UI that
+/// silently degrades to "Open on GitHub" without ever risking unsigned
+/// installs.
+fn emit_warp_update_pubkey_if_unset() {
+    if env::var("WARP_UPDATE_PUBKEY").is_ok() {
+        return;
+    }
+    let pub_path = Path::new("../script/warp-update.pub");
+    let Ok(contents) = fs::read_to_string(pub_path) else {
+        return;
+    };
+    let key_line = contents
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && !line.starts_with("untrusted comment:"));
+    if let Some(line) = key_line {
+        // minisign pubkey body is a single base64 line; reject anything that
+        // doesn't decode cleanly so a corrupted file fails fast at build time
+        // rather than at runtime.
+        if line
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='))
+            && line.len() >= 40
+        {
+            println!("cargo:rustc-env=WARP_UPDATE_PUBKEY={line}");
+        }
+    }
 }
 
 /// Accepts two release tag shapes (mirrors `ParsedGithubVersion::parse`):
