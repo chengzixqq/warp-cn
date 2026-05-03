@@ -243,6 +243,19 @@ done
 # set positional arguments in their proper place
 eval set -- "$PARAMS"
 
+# Auto-detect GIT_RELEASE_TAG from the working tree if no --release-tag was passed
+# and the env wasn't already set. Mirrors `app/build.rs::emit_git_release_tag_if_unset`
+# but does it earlier so cargo sees the env, regardless of whether the build.rs
+# cache is hit.
+if [[ -z "${GIT_RELEASE_TAG:-}" ]]; then
+  detected=$(git describe --tags --exact-match HEAD 2>/dev/null \
+          || git describe --tags --abbrev=0 2>/dev/null || true)
+  if [[ -n "$detected" ]]; then
+    export GIT_RELEASE_TAG="$detected"
+    echo "Auto-detected GIT_RELEASE_TAG=$GIT_RELEASE_TAG"
+  fi
+fi
+
 # Infer a cargo profile from the bundle configuration.
 if [[ $DEBUG = true ]]; then
   CARGO_PROFILE="dev"
@@ -793,6 +806,17 @@ if [[ "$ARTIFACT" = app ]]; then
   echo "Copying dmg and app to $OUT_DIR"
   cp -R "$BUNDLE_DIR/$WARP_APP_NAME.app" "$OUT_DIR"
   cp "$DMG_DIR/$DMG_NAME" "$OUT_DIR/$FINAL_DMG_NAME"
+
+  # Pack the .app into a .tar.gz alongside the .dmg. The tarball is the
+  # artifact consumed by the in-app GitHub-Releases auto-updater: extracting
+  # via `tar` does not propagate `com.apple.quarantine`, so a downloaded
+  # build can replace the running .app and relaunch without Gatekeeper
+  # re-evaluating it. Keep the .dmg as the human-friendly first-install path.
+  TARBALL_NAME="${FINAL_DMG_NAME%.dmg}.tar.gz"
+  TARBALL_PATH="$OUT_DIR/$TARBALL_NAME"
+  echo "Creating $TARBALL_PATH"
+  rm -f "$TARBALL_PATH"
+  tar -C "$BUNDLE_DIR" -czf "$TARBALL_PATH" "$WARP_APP_NAME.app"
 fi
 
 # If this is being run within a GitHub action, set an output variable with the
@@ -828,6 +852,12 @@ if [ "${GITHUB_ACTIONS}" == "true" ]; then
     echo "dmg_name=$FINAL_DMG_NAME" >> "$GITHUB_OUTPUT"
     echo "dmg_path=$DMG_PATH" >> "$GITHUB_OUTPUT"
     echo "dsym_folder_path=$OUT_DIR" >> "$GITHUB_OUTPUT"
+  fi
+
+  # Auto-update tarball, if produced.
+  if [[ -n "${TARBALL_PATH:-}" && -f "$TARBALL_PATH" ]]; then
+    echo "tarball_name=$TARBALL_NAME" >> "$GITHUB_OUTPUT"
+    echo "tarball_path=$TARBALL_PATH" >> "$GITHUB_OUTPUT"
   fi
 
   if [[ -n "$BUNDLED_RESOURCES_DIR" ]]; then

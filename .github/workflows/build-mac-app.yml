@@ -1,7 +1,10 @@
 name: Build Mac App (unsigned)
 
-# 仅手动触发，避免每次 push 都消耗 CI 分钟。
-# 在仓库 Actions 页面点击 "Run workflow" 即可。
+# 两种触发：
+# 1) workflow_dispatch（手动）：开发者按需出包，不发布 release。
+# 2) push tags v*：自动构建 + minisign 签名 + 创建 GitHub Release，
+#    供 in-app github_update 拉取。tag 触发使用固定参数（oss/aarch64/debug）
+#    走最快路径；正式 release 想换 profile/arch 仍可手动 dispatch。
 on:
   workflow_dispatch:
     inputs:
@@ -30,13 +33,17 @@ on:
         options:
           - debug
           - release
+  push:
+    tags:
+      - 'v*'
 
+# tag 触发时需要 contents:write 才能调 `gh release create`。
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
-    name: Build ${{ inputs.channel }} (${{ inputs.arch }})
+    name: Build ${{ inputs.channel || 'oss' }} (${{ inputs.arch || 'aarch64' }})
     # 用 GitHub 免费 macos-14（M1 4-core）。自托管 LaunchAgent 跑 create-dmg 时
     # AppleScript 控 Finder 必超时（无 Aqua GUI session），DMG 美化无法完成；
     # 美化要的话只能走 hosted runner 或 ./run.sh 前台模式（不稳）。
@@ -56,6 +63,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # app/build.rs 用 `git describe --tags` 把 GIT_RELEASE_TAG 烧进二进制；
+          # 默认 shallow clone 不拉 tag，会让产物显示 0.1.0-dev fallback。
+          fetch-tags: true
 
       - name: Show runner info
         run: |
@@ -65,13 +76,13 @@ jobs:
           df -h /
 
       - name: Add Rust target
-        run: rustup target add ${{ inputs.arch }}-apple-darwin
+        run: rustup target add ${{ inputs.arch || 'aarch64' }}-apple-darwin
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
         with:
           # 不同架构 / 档次 / profile 分别缓存（profile 影响 target 子目录与编译产物）
-          key: mac-${{ inputs.arch }}-${{ inputs.channel }}-${{ inputs.profile }}
+          key: mac-${{ inputs.arch || 'aarch64' }}-${{ inputs.channel || 'oss' }}-${{ inputs.profile || 'debug' }}
           # 只在 master 上保存缓存，分支只读
           save-if: ${{ github.ref == 'refs/heads/master' }}
 
@@ -137,13 +148,19 @@ jobs:
           RUNNER_NAME: ${{ runner.environment != 'github-hosted' && format('nsc-{0}', runner.name) || runner.name }}
         run: |
           set -eu
+          # 双保险：tag 触发时把 ref 直接喂给 app/build.rs；branch/workflow_dispatch
+          # 触发时留空，让 build.rs 走 `git describe` 自动探测（依赖 fetch-tags）。
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            export GIT_RELEASE_TAG="${{ github.ref_name }}"
+            echo "GIT_RELEASE_TAG=$GIT_RELEASE_TAG (from tag ref)"
+          fi
           BUNDLE_ARGS=(
             --selfsign
-            --channel "${{ inputs.channel }}"
-            --arch "${{ inputs.arch }}"
-            --dmg-name-suffix "${{ inputs.arch }}"
+            --channel "${{ inputs.channel || 'oss' }}"
+            --arch "${{ inputs.arch || 'aarch64' }}"
+            --dmg-name-suffix "${{ inputs.arch || 'aarch64' }}"
           )
-          if [ "${{ inputs.profile }}" = "debug" ]; then
+          if [ "${{ inputs.profile || 'debug' }}" = "debug" ]; then
             BUNDLE_ARGS+=(--debug)
           fi
           ./script/bundle "${BUNDLE_ARGS[@]}"
@@ -166,7 +183,7 @@ jobs:
       - name: Upload DMG
         uses: actions/upload-artifact@v7
         with:
-          name: warp-${{ inputs.channel }}-${{ inputs.arch }}-${{ inputs.profile }}-dmg
+          name: warp-${{ inputs.channel || 'oss' }}-${{ inputs.arch || 'aarch64' }}-${{ inputs.profile || 'debug' }}-dmg
           path: ${{ steps.paths.outputs.dmg_path }}
           if-no-files-found: error
           retention-days: 14
@@ -180,10 +197,63 @@ jobs:
       - name: Upload .app artifact
         uses: actions/upload-artifact@v7
         with:
-          name: warp-${{ inputs.channel }}-${{ inputs.arch }}-${{ inputs.profile }}-app
+          name: warp-${{ inputs.channel || 'oss' }}-${{ inputs.arch || 'aarch64' }}-${{ inputs.profile || 'debug' }}-app
           path: ${{ steps.paths.outputs.out_dir }}/app-bundle.zip
           if-no-files-found: error
           retention-days: 14
+
+      # ===== Auto-update release pipeline (tag push only) =====
+      # 把 bundle 脚本产出的 .tar.gz 用 minisign 签名，然后建/更新 GitHub Release。
+      # 进程内 reqwest 下载 + tar 解压不会附加 com.apple.quarantine xattr，
+      # 因此 ad-hoc 签名 .app 替换后 Gatekeeper 不会重新评估，更新对用户静默。
+      # 见 app/src/github_update/install.rs。
+      - name: Install rsign2 (minisign signer)
+        if: github.ref_type == 'tag'
+        run: cargo install --quiet --locked rsign2
+
+      - name: Sign tarball with minisign
+        if: github.ref_type == 'tag'
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          set -eu
+          if [ -z "${MINISIGN_SECRET_KEY:-}" ]; then
+            echo "::error::MINISIGN_SECRET_KEY secret is not set; run script/generate_update_keys.sh and add the secret key to repo secrets."
+            exit 1
+          fi
+          TARBALL="${{ steps.bundle.outputs.tarball_path }}"
+          if [ -z "$TARBALL" ] || [ ! -f "$TARBALL" ]; then
+            echo "::error::bundle did not produce a tarball (tarball_path output empty)"
+            exit 1
+          fi
+          SK_FILE="$(mktemp)"
+          # 用 printf 而非 echo：echo 在 -e 默认开启的 sh 上会解释反斜杠，破坏私钥编码。
+          printf '%s' "$MINISIGN_SECRET_KEY" > "$SK_FILE"
+          rsign sign -W -s "$SK_FILE" "$TARBALL"
+          rm -f "$SK_FILE"
+          ls -la "${TARBALL}" "${TARBALL}.minisig"
+        shell: bash
+
+      - name: Publish GitHub Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          TAG="${{ github.ref_name }}"
+          TARBALL="${{ steps.bundle.outputs.tarball_path }}"
+          DMG="${{ steps.paths.outputs.dmg_path }}"
+          # release 已存在则上传到现有 release（多架构构建分别上传到同一 tag）。
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG exists; uploading assets to it"
+            gh release upload "$TAG" "$TARBALL" "${TARBALL}.minisig" "$DMG" --clobber
+          else
+            gh release create "$TAG" \
+              "$TARBALL" "${TARBALL}.minisig" "$DMG" \
+              --title "$TAG" \
+              --generate-notes
+          fi
+        shell: bash
 
       # 把 keychain search list 还原成原样，避免后续在同一 runner 上的其他工作流受影响。
       - name: Restore keychain search list
