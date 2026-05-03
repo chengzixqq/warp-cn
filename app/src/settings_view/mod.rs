@@ -1639,6 +1639,12 @@ impl SettingsView {
     ) {
         match event {
             SettingsPageEvent::FocusModal => ctx.focus(&self.search_editor),
+            SettingsPageEvent::ShowToast { message, flavor } => {
+                ctx.emit(SettingsViewEvent::ShowToast {
+                    message: message.clone(),
+                    flavor: *flavor,
+                })
+            }
             SettingsPageEvent::Pane(_)
             | SettingsPageEvent::EnvironmentSetupModeSelectorToggled { .. }
             | SettingsPageEvent::AgentAssistedEnvironmentModalToggled { .. } => {
@@ -1663,6 +1669,12 @@ impl SettingsView {
             SettingsPageEvent::Pane(_) => {
                 // Not applicable in standalone settings view.
             }
+            SettingsPageEvent::ShowToast { message, flavor } => {
+                ctx.emit(SettingsViewEvent::ShowToast {
+                    message: message.clone(),
+                    flavor: *flavor,
+                })
+            }
         }
     }
 
@@ -1686,6 +1698,12 @@ impl SettingsView {
     ) {
         match event {
             SettingsPageEvent::FocusModal => ctx.focus(&self.search_editor),
+            SettingsPageEvent::ShowToast { message, flavor } => {
+                ctx.emit(SettingsViewEvent::ShowToast {
+                    message: message.clone(),
+                    flavor: *flavor,
+                })
+            }
             SettingsPageEvent::Pane(_)
             | SettingsPageEvent::EnvironmentSetupModeSelectorToggled { .. }
             | SettingsPageEvent::AgentAssistedEnvironmentModalToggled { .. } => {

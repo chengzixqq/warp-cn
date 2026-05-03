@@ -63,7 +63,7 @@ use crate::workspace::WorkspaceAction;
 use crate::{editor::EditorView, themes::theme_chooser::ThemeChooserMode};
 use crate::{
     features::FeatureFlag,
-    view_components::{Dropdown, DropdownItem, FilterableDropdown},
+    view_components::{Dropdown, DropdownItem, FilterableDropdown, ToastFlavor},
 };
 use crate::{report_error, report_if_error, themes};
 use crate::{send_telemetry_from_ctx, server::telemetry::TelemetryEvent};
@@ -688,6 +688,10 @@ impl TypedActionView for AppearanceSettingsPageView {
                         report_if_error!(settings.language.set_value(*lang, ctx));
                     },
                 );
+                ctx.emit(SettingsPageEvent::ShowToast {
+                    message: warp_i18n::t!("settings-features-language-restart-toast"),
+                    flavor: ToastFlavor::Success,
+                });
             }
         }
     }
@@ -879,6 +883,13 @@ impl AppearanceSettingsPageView {
             });
             ctx.notify()
         });
+        ctx.subscribe_to_model(
+            &crate::language_settings::LanguageSettings::handle(ctx),
+            |me, _, _, ctx| {
+                me.refresh_language_dropdown(ctx);
+                ctx.notify();
+            },
+        );
         ctx.subscribe_to_model(&SessionSettings::handle(ctx), |_, _, _, ctx| ctx.notify());
         ctx.subscribe_to_model(&BlockListSettings::handle(ctx), |_, _, _, ctx| ctx.notify());
         ctx.subscribe_to_model(&WindowSettings::handle(ctx), |me, _, evt, ctx| {
@@ -1211,30 +1222,8 @@ impl AppearanceSettingsPageView {
             ctx.add_typed_action_view(HeaderToolbarInlineEditor::new);
 
         let language_dropdown = ctx.add_typed_action_view(|ctx| {
-            use crate::language_settings::{Language, LanguageSettings};
             let mut dropdown = Dropdown::new(ctx);
-            let items = vec![
-                DropdownItem::new(
-                    warp_i18n::t!("settings-features-language-zh"),
-                    AppearancePageAction::SetLanguage(Language::Zh),
-                ),
-                DropdownItem::new(
-                    warp_i18n::t!("settings-features-language-en"),
-                    AppearancePageAction::SetLanguage(Language::En),
-                ),
-                DropdownItem::new(
-                    warp_i18n::t!("settings-features-language-system"),
-                    AppearancePageAction::SetLanguage(Language::System),
-                ),
-            ];
-            dropdown.set_items(items, ctx);
-            let current = *LanguageSettings::as_ref(ctx).language;
-            let label = match current {
-                Language::Zh => warp_i18n::t!("settings-features-language-zh"),
-                Language::En => warp_i18n::t!("settings-features-language-en"),
-                Language::System => warp_i18n::t!("settings-features-language-system"),
-            };
-            dropdown.set_selected_by_name(label, ctx);
+            Self::configure_language_dropdown(&mut dropdown, ctx);
             dropdown
         });
 
@@ -2503,6 +2492,42 @@ impl AppearanceSettingsPageView {
 
             dropdown
         })
+    }
+
+    fn configure_language_dropdown(
+        dropdown: &mut Dropdown<AppearancePageAction>,
+        ctx: &mut ViewContext<Dropdown<AppearancePageAction>>,
+    ) {
+        use crate::language_settings::{Language, LanguageSettings};
+
+        dropdown.set_items(
+            vec![
+                DropdownItem::new(
+                    warp_i18n::t!("settings-features-language-zh"),
+                    AppearancePageAction::SetLanguage(Language::Zh),
+                ),
+                DropdownItem::new(
+                    warp_i18n::t!("settings-features-language-en"),
+                    AppearancePageAction::SetLanguage(Language::En),
+                ),
+                DropdownItem::new(
+                    warp_i18n::t!("settings-features-language-system"),
+                    AppearancePageAction::SetLanguage(Language::System),
+                ),
+            ],
+            ctx,
+        );
+
+        dropdown.set_selected_by_action(
+            AppearancePageAction::SetLanguage(*LanguageSettings::as_ref(ctx).language),
+            ctx,
+        );
+    }
+
+    fn refresh_language_dropdown(&mut self, ctx: &mut ViewContext<Self>) {
+        self.language_dropdown.update(ctx, |dropdown, ctx| {
+            Self::configure_language_dropdown(dropdown, ctx);
+        });
     }
 
     fn handle_directory_color_add_picker_event(
@@ -5264,22 +5289,6 @@ impl SettingsWidget for LanguageWidget {
             .with_child(ChildView::new(&view.language_dropdown).finish())
             .finish();
 
-        // Live in-app locale switch crashes on macOS due to AppKit's NSMenu
-        // sharing rules during main-menu rebuild. Until the underlying menu
-        // rebuild is reworked, surface a manual-restart hint to users — bold,
-        // tinted with `ui_warning_color` so the warning is impossible to miss.
-        let warning = appearance
-            .ui_builder()
-            .span(warp_i18n::t!("settings-features-language-restart-warning"))
-            .with_style(
-                UiComponentStyles::default()
-                    .set_margin(Coords::default().bottom(10.))
-                    .set_font_color(appearance.theme().ui_warning_color())
-                    .set_font_weight(Weight::Bold),
-            )
-            .build()
-            .finish();
-
-        Flex::column().with_child(row).with_child(warning).finish()
+        row
     }
 }

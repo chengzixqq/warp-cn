@@ -68,7 +68,7 @@ settings-features-language = Language
 settings-features-language-zh = 简体中文
 settings-features-language-en = English
 settings-features-language-system = Follow System
-settings-features-language-restart-warning = ⚠️ Switching language requires manually restarting Warp — otherwise the app will crash immediately!
+settings-features-language-restart-toast = Language saved. Please restart Warp manually for it to take effect.
 
 # Category headers
 settings-features-cat-general = General

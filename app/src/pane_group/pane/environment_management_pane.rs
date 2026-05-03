@@ -107,6 +107,13 @@ impl PaneContent for EnvironmentManagementPane {
                 SettingsPageEvent::FocusModal => {
                     // Not applicable when hosted in a pane.
                 }
+                SettingsPageEvent::ShowToast { message, flavor } => {
+                    ctx.emit(crate::pane_group::Event::ShowToast {
+                        message: message.clone(),
+                        flavor: *flavor,
+                        pane_id: Some(pane_id),
+                    });
+                }
             },
         );
 

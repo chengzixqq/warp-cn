@@ -29,7 +29,7 @@ use crate::{
     settings::CloudPreferencesSettings,
     themes::theme::Fill,
     ui_components::icons::Icon,
-    view_components::{Dropdown, SubmittableTextInput},
+    view_components::{Dropdown, SubmittableTextInput, ToastFlavor},
 };
 use pathfinder_geometry::vector::vec2f;
 use settings::Setting;
@@ -199,8 +199,16 @@ impl SettingsPage {
 pub enum SettingsPageEvent {
     FocusModal,
     Pane(PaneEventWrapper),
-    EnvironmentSetupModeSelectorToggled { is_open: bool },
-    AgentAssistedEnvironmentModalToggled { is_open: bool },
+    ShowToast {
+        message: String,
+        flavor: ToastFlavor,
+    },
+    EnvironmentSetupModeSelectorToggled {
+        is_open: bool,
+    },
+    AgentAssistedEnvironmentModalToggled {
+        is_open: bool,
+    },
 }
 
 /// Wrapper for pane events to avoid circular dependency with pane module.

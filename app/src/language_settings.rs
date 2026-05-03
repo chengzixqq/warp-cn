@@ -6,9 +6,9 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use warp_core::settings::{
-    RespectUserSyncSetting, SupportedPlatforms, SyncToCloud, macros::define_settings_group,
+    macros::define_settings_group, RespectUserSyncSetting, SupportedPlatforms, SyncToCloud,
 };
-use warpui::SingletonEntity;
+use warpui::{AppContext, SingletonEntity};
 
 #[derive(
     Default,
@@ -57,25 +57,12 @@ define_settings_group!(LanguageSettings, settings: [
     },
 ]);
 
-/// Apply the current [`Language`] setting to [`warp_i18n`] and re-apply on every
-/// settings change. On macOS, also triggers a main menu rebuild so AppKit labels
-/// reflect the new locale.
-pub fn bind_to_warp_i18n(ctx: &mut warpui::AppContext) {
+/// Apply the current [`Language`] setting to [`warp_i18n`] at startup.
+///
+/// Runtime language changes are saved to settings, but take effect after restart. Rebuilding all
+/// translated UI while menus and settings controls are active can leave the app in a partially
+/// translated state.
+pub fn bind_to_warp_i18n(ctx: &mut AppContext) {
     let initial = LanguageSettings::as_ref(ctx).language.resolve_locale();
     warp_i18n::set_locale(initial);
-
-    ctx.subscribe_to_model(&LanguageSettings::handle(ctx), |_, _event, ctx| {
-        let locale = LanguageSettings::as_ref(ctx).language.resolve_locale();
-        warp_i18n::set_locale(locale);
-        ctx.invalidate_all_views();
-        #[cfg(target_os = "macos")]
-        rebuild_main_menu_if_ready();
-    });
-}
-
-#[cfg(target_os = "macos")]
-fn rebuild_main_menu_if_ready() {
-    if warp_i18n::try_global().is_some() {
-        warpui::platform::mac::rebuild_main_menu();
-    }
 }

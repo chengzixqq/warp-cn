@@ -68,7 +68,7 @@ settings-features-language = 语言
 settings-features-language-zh = 简体中文
 settings-features-language-en = English
 settings-features-language-system = 跟随系统
-settings-features-language-restart-warning = ⚠️ 切换语言后必须手动重启 Warp，否则会立即闪退！
+settings-features-language-restart-toast = 语言设置已保存，请手动重启 Warp 后生效。
 
 # 分组标题
 settings-features-cat-general = 通用
