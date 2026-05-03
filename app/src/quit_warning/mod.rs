@@ -400,7 +400,9 @@ impl<'a> QuitWarningDialog<'a> {
 
         if let Some(callback) = on_confirm {
             let confirm_title = match state.scope {
-                QuitScope::Window(_) | QuitScope::Tabs(_) | QuitScope::Pane { .. } => warp_i18n::t!("dialog-yes-close"),
+                QuitScope::Window(_) | QuitScope::Tabs(_) | QuitScope::Pane { .. } => {
+                    warp_i18n::t!("dialog-yes-close")
+                }
                 QuitScope::App => warp_i18n::t!("dialog-yes-quit"),
                 _ => String::new(),
             };
@@ -412,7 +414,10 @@ impl<'a> QuitWarningDialog<'a> {
         }
 
         if let Some(callback) = on_discard_changes {
-            buttons.push(ModalButton::for_app(warp_i18n::t!("dialog-dont-save"), callback));
+            buttons.push(ModalButton::for_app(
+                warp_i18n::t!("dialog-dont-save"),
+                callback,
+            ));
         }
 
         if let Some(callback) = on_show_processes {
@@ -427,7 +432,10 @@ impl<'a> QuitWarningDialog<'a> {
         }
 
         if let Some(callback) = on_cancel {
-            buttons.push(ModalButton::for_app(warp_i18n::t!("dialog-cancel"), callback));
+            buttons.push(ModalButton::for_app(
+                warp_i18n::t!("dialog-cancel"),
+                callback,
+            ));
         }
 
         let title = match &state.scope {

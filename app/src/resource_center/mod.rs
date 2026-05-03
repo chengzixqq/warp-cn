@@ -139,12 +139,7 @@ pub struct FeatureItem {
 }
 
 impl FeatureItem {
-    pub fn new(
-        title: String,
-        description: String,
-        feature: Tip,
-        ctx: &mut AppContext,
-    ) -> Self {
+    pub fn new(title: String, description: String, feature: Tip, ctx: &mut AppContext) -> Self {
         let editable_binding_name;
         let shortcut;
 

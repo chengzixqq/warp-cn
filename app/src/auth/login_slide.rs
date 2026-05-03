@@ -293,7 +293,10 @@ impl LoginSlideView {
                 },
                 ctx,
             );
-            editor.set_placeholder_text(warp_i18n::t!("onboarding-login-browser-token-input-placeholder"), ctx);
+            editor.set_placeholder_text(
+                warp_i18n::t!("onboarding-login-browser-token-input-placeholder"),
+                ctx,
+            );
             editor
         });
 
@@ -464,9 +467,15 @@ impl LoginSlideView {
     /// Terminal+Drive), since there are no AI features to opt out of there.
     fn privacy_disclaimer_prefix(&self) -> String {
         if self.ai_enabled {
-            format!("{} ", warp_i18n::t!("onboarding-login-disclaimer-privacy-prefix-with-ai"))
+            format!(
+                "{} ",
+                warp_i18n::t!("onboarding-login-disclaimer-privacy-prefix-with-ai")
+            )
         } else {
-            format!("{} ", warp_i18n::t!("onboarding-login-disclaimer-privacy-prefix-no-ai"))
+            format!(
+                "{} ",
+                warp_i18n::t!("onboarding-login-disclaimer-privacy-prefix-no-ai")
+            )
         }
     }
 
@@ -513,7 +522,10 @@ impl LoginSlideView {
         let tos_line = Flex::row()
             .with_child(
                 ui_builder
-                    .span(format!("{} ", warp_i18n::t!("onboarding-login-disclaimer-tos-prefix")))
+                    .span(format!(
+                        "{} ",
+                        warp_i18n::t!("onboarding-login-disclaimer-tos-prefix")
+                    ))
                     .with_style(disclaimer_styles)
                     .build()
                     .finish(),
@@ -624,7 +636,9 @@ impl LoginSlideView {
         let login_button = self.login_button.render(
             appearance,
             button::Params {
-                content: button::Content::Label(warp_i18n::t!("onboarding-login-button-continue").into()),
+                content: button::Content::Label(
+                    warp_i18n::t!("onboarding-login-button-continue").into(),
+                ),
                 theme: &button::themes::Primary,
                 options: button::Options {
                     keystroke: Some(enter),
@@ -687,7 +701,10 @@ impl LoginSlideView {
                 Flex::row()
                     .with_child(
                         ui_builder
-                            .span(format!("{} ", warp_i18n::t!("onboarding-login-browser-hint-prefix")))
+                            .span(format!(
+                                "{} ",
+                                warp_i18n::t!("onboarding-login-browser-hint-prefix")
+                            ))
                             .with_style(sub_text_styles)
                             .build()
                             .finish(),
@@ -708,7 +725,10 @@ impl LoginSlideView {
                     )
                     .with_child(
                         ui_builder
-                            .span(format!(" {}", warp_i18n::t!("onboarding-login-browser-hint-mid")))
+                            .span(format!(
+                                " {}",
+                                warp_i18n::t!("onboarding-login-browser-hint-mid")
+                            ))
                             .with_style(sub_text_styles)
                             .build()
                             .finish(),
@@ -821,15 +841,18 @@ impl LoginSlideView {
     ) -> Vec<Box<dyn Element>> {
         let theme = appearance.theme();
 
-        let title =
-            FormattedTextElement::from_str(warp_i18n::t!("onboarding-login-privacy-title"), appearance.ui_font_family(), 36.)
-                .with_color(internal_colors::text_main(
-                    theme,
-                    theme.background().into_solid(),
-                ))
-                .with_weight(Weight::Medium)
-                .with_alignment(TextAlignment::Left)
-                .finish();
+        let title = FormattedTextElement::from_str(
+            warp_i18n::t!("onboarding-login-privacy-title"),
+            appearance.ui_font_family(),
+            36.,
+        )
+        .with_color(internal_colors::text_main(
+            theme,
+            theme.background().into_solid(),
+        ))
+        .with_weight(Weight::Medium)
+        .with_alignment(TextAlignment::Left)
+        .finish();
 
         let actions = PrivacySettingsActions {
             toggle_telemetry: LoginSlideAction::ToggleTelemetry,
@@ -952,12 +975,16 @@ impl LoginSlideView {
                 .with_width(16.)
                 .with_height(16.)
                 .finish();
-            let text_el = FormattedTextElement::from_str(warp_i18n::tr!(item), appearance.ui_font_family(), 14.)
-                .with_color(feature_row_color)
-                .with_weight(Weight::Normal)
-                .with_alignment(TextAlignment::Left)
-                .with_line_height_ratio(1.0)
-                .finish();
+            let text_el = FormattedTextElement::from_str(
+                warp_i18n::tr!(item),
+                appearance.ui_font_family(),
+                14.,
+            )
+            .with_color(feature_row_color)
+            .with_weight(Weight::Normal)
+            .with_alignment(TextAlignment::Left)
+            .with_line_height_ratio(1.0)
+            .finish();
             let row = Flex::row()
                 .with_cross_axis_alignment(CrossAxisAlignment::Center)
                 .with_child(icon_el)
@@ -1004,7 +1031,9 @@ impl LoginSlideView {
         let skip_confirm_button = self.dialog_skip_button.render(
             appearance,
             button::Params {
-                content: button::Content::Label(warp_i18n::t!("onboarding-login-skip-dialog-confirm").into()),
+                content: button::Content::Label(
+                    warp_i18n::t!("onboarding-login-skip-dialog-confirm").into(),
+                ),
                 theme: &button::themes::Primary,
                 options: button::Options {
                     keystroke: Some(dialog_enter),

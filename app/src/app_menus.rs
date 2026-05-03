@@ -27,8 +27,8 @@ use itertools::Itertools;
 use settings::manager::SettingsManager;
 use settings::Setting as _;
 use warp_core::context_flag::ContextFlag;
-use warp_util::path::user_friendly_path;
 use warp_i18n::t;
+use warp_util::path::user_friendly_path;
 use warpui::actions::StandardAction;
 use warpui::keymap::{Keystroke, Trigger};
 use warpui::platform::menu::{
@@ -908,7 +908,10 @@ fn make_new_help_menu() -> Menu {
         vec![
             feedback_menu_item(),
             link_menu_item(t!("menu-help-documentation"), links::USER_DOCS_URL.into()),
-            link_menu_item(t!("menu-help-github-issues"), links::GITHUB_ISSUES_URL.into()),
+            link_menu_item(
+                t!("menu-help-github-issues"),
+                links::GITHUB_ISSUES_URL.into(),
+            ),
             link_menu_item(t!("menu-help-slack-community"), links::SLACK_URL.into()),
         ],
     )
