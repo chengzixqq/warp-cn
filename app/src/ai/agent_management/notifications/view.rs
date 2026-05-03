@@ -27,6 +27,7 @@ use crate::ai::artifacts::{Artifact, ArtifactButtonsRow, ArtifactButtonsRowEvent
 use crate::appearance::Appearance;
 use crate::ui_components::icons::Icon;
 use crate::view_components::action_button::{ActionButton, ButtonSize, NakedTheme};
+use warp_i18n::t;
 
 const ITEM_PADDING: f32 = 12.;
 
@@ -120,7 +121,7 @@ impl NotificationMailboxView {
             ActionButton::new("", NakedTheme)
                 .with_icon(Icon::X)
                 .with_size(ButtonSize::XSmall)
-                .with_tooltip("Close")
+                .with_tooltip(t!("ai-ui-notifications-close"))
                 .with_tooltip_sublabel("Esc")
                 .on_click(|ctx| {
                     ctx.dispatch_typed_action(NotificationMailboxViewAction::Dismiss);
@@ -128,7 +129,7 @@ impl NotificationMailboxView {
         });
 
         let mark_all_read_button = ctx.add_typed_action_view(|_| {
-            ActionButton::new("Mark all as read", NakedTheme)
+            ActionButton::new(t!("ai-ui-notifications-mark-all-read"), NakedTheme)
                 .with_size(ButtonSize::Small)
                 .on_click(|ctx| {
                     ctx.dispatch_typed_action(NotificationMailboxViewAction::MarkAllRead);
@@ -409,7 +410,7 @@ impl NotificationMailboxView {
 
         let label = appearance
             .ui_builder()
-            .wrappable_text("Notifications".to_string(), false)
+            .wrappable_text(t!("ai-ui-notifications-title"), false)
             .with_style(UiComponentStyles {
                 font_size: Some(14.),
                 font_color: Some(theme.main_text_color(theme.surface_2()).into()),
@@ -460,9 +461,14 @@ impl NotificationMailboxView {
             let is_active = self.active_filter == filter;
             let count = notifications.filtered_count(filter);
             let label = if count == 0 {
-                filter.label().to_string()
+                filter.label()
             } else {
-                format!("{} ({count})", filter.label())
+                let filter_label = filter.label();
+                t!(
+                    "ai-ui-notifications-filter-with-count",
+                    label = filter_label,
+                    count = count
+                )
             };
             let text_color = if is_active {
                 theme.main_text_color(theme.surface_2())
@@ -546,7 +552,7 @@ impl NotificationMailboxView {
         Container::new(
             appearance
                 .ui_builder()
-                .wrappable_text("No notifications".to_string(), false)
+                .wrappable_text(t!("ai-ui-notifications-empty"), false)
                 .with_style(UiComponentStyles {
                     font_size: Some(14.),
                     font_color: Some(theme.sub_text_color(theme.surface_2()).into()),

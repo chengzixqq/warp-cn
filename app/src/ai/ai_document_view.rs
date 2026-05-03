@@ -51,6 +51,7 @@ use pathfinder_geometry::vector::vec2f;
 use warp_core::ui::icons;
 use warp_core::ui::icons::ICON_DIMENSIONS;
 use warp_core::ui::theme::Fill as ThemeFill;
+use warp_i18n::t;
 use warpui::clipboard::ClipboardContent;
 use warpui::elements::CrossAxisAlignment;
 use warpui::elements::MainAxisAlignment;
@@ -350,7 +351,7 @@ impl AIDocumentView {
             ActionButton::new("", NakedTheme)
                 .with_icon(icons::Icon::History)
                 .with_size(ButtonSize::Small)
-                .with_tooltip("Show version history")
+                .with_tooltip(t!("ai-ui-show-version-history"))
                 .on_click(|ctx| {
                     ctx.dispatch_typed_action(
                         PaneHeaderAction::<AIDocumentAction, AIDocumentAction>::CustomAction(
@@ -374,9 +375,9 @@ impl AIDocumentView {
         let save_action = keybinding_name_to_keystroke(SAVE_FILE_BINDING_NAME, ctx)
             .map(|k| k.displayed())
             .unwrap_or("Click".to_string());
-        let tooltip_text = format!("This plan has changes the agent isn't aware of. {save_action} to stop the agent's current task and send the updated plan");
+        let tooltip_text = t!("ai-ui-update-agent-tooltip", shortcut = save_action);
         let update_plan_button = ctx.add_typed_action_view(|_ctx| {
-            ActionButton::new("Update Agent", PrimaryTheme)
+            ActionButton::new(t!("ai-ui-update-agent"), PrimaryTheme)
                 .with_size(ButtonSize::Small)
                 .with_tooltip(tooltip_text)
                 .with_tooltip_alignment(TooltipAlignment::Right)
@@ -392,7 +393,7 @@ impl AIDocumentView {
 
         // Create restore button
         let restore_button = ctx.add_typed_action_view(|_ctx| {
-            ActionButton::new("Restore", SecondaryTheme)
+            ActionButton::new(t!("ai-ui-restore"), SecondaryTheme)
                 .with_size(ButtonSize::Small)
                 .on_click(|ctx| {
                     ctx.dispatch_typed_action(
@@ -610,7 +611,7 @@ impl AIDocumentView {
                 let appearance = Appearance::as_ref(app);
                 let ui_builder = appearance.ui_builder().clone();
                 let tooltip = ui_builder
-                    .tool_tip("Save and auto-sync this plan to your Warp Drive".to_string())
+                    .tool_tip(t!("ai-ui-plan-save-sync-tooltip"))
                     .build()
                     .finish();
                 let sync_button_mouse_state = self.sync_button_mouse_state.clone();
@@ -1227,13 +1228,13 @@ impl BackingView for AIDocumentView {
             AIDocumentModel::as_ref(ctx).get_document_warp_drive_object_link(&self.document_id, ctx)
         {
             menu_items.push(
-                MenuItemFields::new("Copy link")
+                MenuItemFields::new(t!("drive-menu-copy-link"))
                     .with_on_select_action(AIDocumentAction::CopyLink(link))
                     .with_icon(Icon::Link)
                     .into_item(),
             );
             menu_items.push(
-                MenuItemFields::new("Show in Warp Drive")
+                MenuItemFields::new(t!("ai-ui-show-in-warp-drive"))
                     .with_on_select_action(AIDocumentAction::ShowInWarpDrive)
                     .with_icon(Icon::WarpDrive)
                     .into_item(),
@@ -1243,7 +1244,7 @@ impl BackingView for AIDocumentView {
         #[cfg(feature = "local_fs")]
         {
             menu_items.push(
-                crate::menu::MenuItemFields::new("Save as markdown file")
+                crate::menu::MenuItemFields::new(t!("ai-ui-save-markdown-file"))
                     .with_on_select_action(AIDocumentAction::Export)
                     .with_icon(Icon::Download)
                     .into_item(),
@@ -1252,7 +1253,7 @@ impl BackingView for AIDocumentView {
 
         // Add "Attach to active session" menu item
         menu_items.push(
-            MenuItemFields::new("Attach to active session")
+            MenuItemFields::new(t!("ai-ui-attach-active-session"))
                 .with_on_select_action(AIDocumentAction::AttachToActiveSession)
                 .with_icon(Icon::Paperclip)
                 .into_item(),
@@ -1260,7 +1261,7 @@ impl BackingView for AIDocumentView {
 
         // Add "Copy plan ID" menu item
         menu_items.push(
-            MenuItemFields::new("Copy plan ID")
+            MenuItemFields::new(t!("ai-ui-copy-plan-id"))
                 .with_on_select_action(AIDocumentAction::CopyPlanId)
                 .with_icon(Icon::Copy)
                 .into_item(),

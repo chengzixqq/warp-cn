@@ -4,6 +4,7 @@ use settings::Setting;
 use warp_core::send_telemetry_from_ctx;
 use warp_core::ui::color::blend::Blend;
 use warp_core::ui::theme::Fill;
+use warp_i18n::t;
 use warpui::{
     elements::{
         ChildAnchor, ChildView, ConstrainedBox, OffsetPositioning, ParentAnchor, ParentElement,
@@ -142,7 +143,7 @@ impl EnvironmentSelector {
         let button = ctx.add_typed_action_view(|_ctx| {
             ActionButton::new("", AgentInputButtonTheme)
                 .with_icon(Icon::Globe4)
-                .with_tooltip("Choose an environment")
+                .with_tooltip(t!("ai-ui-choose-environment"))
                 .with_size(ButtonSize::AgentInputButton)
                 .with_disabled_theme(DisabledTheme)
                 .on_click(|ctx| {

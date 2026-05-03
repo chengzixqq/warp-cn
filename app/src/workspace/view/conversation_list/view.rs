@@ -32,7 +32,7 @@ use crate::workspace::WorkspaceAction;
 use warp_core::features::FeatureFlag;
 use warp_core::send_telemetry_from_ctx;
 use warp_core::ui::Icon;
-use warp_i18n::t;
+use warp_i18n::{t, t_static};
 
 use super::view_model::{ConversationEntry, ConversationListViewModel};
 use warp_editor::editor::NavigationKey;
@@ -53,7 +53,6 @@ use warpui::{
     ViewContext, ViewHandle, WindowId,
 };
 
-const VIEW_ALL_LABEL: &str = "View all";
 /// Maximum number of past items to show before the user toggles "view all".
 const INITIAL_MAX_PAST_ITEMS: usize = 10;
 
@@ -227,7 +226,7 @@ impl ConversationListView {
                 ctx,
             );
 
-            editor.set_placeholder_text("Search", ctx);
+            editor.set_placeholder_text(t!("ai-ui-conversation-list-search"), ctx);
             editor
         });
         ctx.subscribe_to_view(&query_editor, |me, _handle, event, ctx| {
@@ -237,11 +236,14 @@ impl ConversationListView {
         // We use this as both the "view all" and "show less" button
         // (switching out the text on-toggle).
         let toggle_view_all_button = ctx.add_typed_action_view(|_| {
-            ActionButton::new(VIEW_ALL_LABEL, SecondaryTheme)
-                .with_size(ButtonSize::Small)
-                .on_click(|ctx| {
-                    ctx.dispatch_typed_action(ConversationListViewAction::ToggleViewAll);
-                })
+            ActionButton::new(
+                t_static!("ai-ui-conversation-list-view-all"),
+                SecondaryTheme,
+            )
+            .with_size(ButtonSize::Small)
+            .on_click(|ctx| {
+                ctx.dispatch_typed_action(ConversationListViewAction::ToggleViewAll);
+            })
         });
 
         let item_overflow_menu = ctx.add_typed_action_view(|_| {
@@ -661,15 +663,19 @@ fn render_zero_state(
         .with_cross_axis_alignment(CrossAxisAlignment::Center)
         .with_spacing(4.)
         .with_child(
-            Text::new(t!("ai-ui-no-conversations"), appearance.ui_font_family(), 14.)
-                .with_color(theme.sub_text_color(theme.background()).into_solid())
-                .with_style(Properties::default().weight(Weight::Semibold))
-                .finish(),
+            Text::new(
+                t!("ai-ui-no-conversations"),
+                appearance.ui_font_family(),
+                14.,
+            )
+            .with_color(theme.sub_text_color(theme.background()).into_solid())
+            .with_style(Properties::default().weight(Weight::Semibold))
+            .finish(),
         )
         .with_child(
             ConstrainedBox::new(
                 FormattedTextElement::from_str(
-                    "Your active and past conversations with local and ambient agents will appear here.",
+                    t!("ai-ui-conversation-list-empty-desc"),
                     appearance.ui_font_family(),
                     14.,
                 )
@@ -684,9 +690,13 @@ fn render_zero_state(
 
     let new_conversation_button =
         Hoverable::new(zero_state_button_mouse_state, move |mouse_state| {
-            let label = Text::new_inline("New conversation", appearance.ui_font_family(), 12.)
-                .with_color(theme.main_text_color(theme.background()).into_solid())
-                .finish();
+            let label = Text::new_inline(
+                t!("ai-ui-conversation-list-new-conversation"),
+                appearance.ui_font_family(),
+                12.,
+            )
+            .with_color(theme.main_text_color(theme.background()).into_solid())
+            .finish();
 
             let button_content = Flex::row()
                 .with_cross_axis_alignment(CrossAxisAlignment::Center)
@@ -785,8 +795,8 @@ fn render_section_header(
 
     let title_text = Text::new_inline(
         match section {
-            ConversationSection::Active => "ACTIVE",
-            ConversationSection::Past => "PAST",
+            ConversationSection::Active => t!("ai-ui-conversation-list-active-section"),
+            ConversationSection::Past => t!("ai-ui-conversation-list-past-section"),
         },
         appearance.ui_font_family(),
         11.,
@@ -900,7 +910,7 @@ impl TypedActionView for ConversationListView {
                     let is_ambient_agent_conversation =
                         matches!(conversation_id, ConversationOrTaskId::TaskId(_));
 
-                    let mut delete_item = MenuItemFields::new("Delete")
+                    let mut delete_item = MenuItemFields::new(t!("ai-ui-conversation-list-delete"))
                         .with_override_text_color(Appearance::as_ref(ctx).theme().ansi_fg_red())
                         .with_on_select_action(ConversationListViewAction::DeleteFromOverflowMenu {
                             conversation_id,
@@ -908,7 +918,7 @@ impl TypedActionView for ConversationListView {
                         .with_disabled(is_ambient_agent_conversation);
                     if is_ambient_agent_conversation {
                         delete_item = delete_item
-                            .with_tooltip("Ambient agent conversations cannot be deleted");
+                            .with_tooltip(t!("ai-ui-conversation-list-cannot-delete-ambient"));
                     }
 
                     // Check if conversation is shareable:
@@ -933,7 +943,7 @@ impl TypedActionView for ConversationListView {
                     // Only show share item if the conversation is shareable
                     let share_item = if is_shareable {
                         Some(
-                            MenuItemFields::new("Share conversation")
+                            MenuItemFields::new(t!("ai-ui-conversation-list-share"))
                                 .with_on_select_action(
                                     ConversationListViewAction::OpenShareDialog { conversation_id },
                                 )
@@ -947,7 +957,7 @@ impl TypedActionView for ConversationListView {
                         // Forking from a closed ambient agent conversation is not supported at this point.
                         if !is_ambient_agent_conversation {
                             Some([
-                                MenuItemFields::new("Fork in new pane")
+                                MenuItemFields::new(t!("ai-ui-conversation-list-fork-new-pane"))
                                     .with_on_select_action(
                                         ConversationListViewAction::ForkConversation {
                                             conversation_id,
@@ -955,7 +965,7 @@ impl TypedActionView for ConversationListView {
                                         },
                                     )
                                     .into_item(),
-                                MenuItemFields::new("Fork in new tab")
+                                MenuItemFields::new(t!("ai-ui-conversation-list-fork-new-tab"))
                                     .with_on_select_action(
                                         ConversationListViewAction::ForkConversation {
                                             conversation_id,
@@ -1117,9 +1127,9 @@ impl TypedActionView for ConversationListView {
                 self.view_all = !self.view_all;
 
                 let label = if self.view_all {
-                    "Show less"
+                    t!("ai-ui-conversation-list-show-less")
                 } else {
-                    VIEW_ALL_LABEL
+                    t!("ai-ui-conversation-list-view-all")
                 };
                 self.toggle_view_all_button
                     .update(ctx, |button, ctx| button.set_label(label, ctx));
