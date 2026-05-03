@@ -388,8 +388,35 @@ fn resolve_github_token() -> Option<String> {
 }
 
 fn read_gh_cli_token() -> Option<String> {
-    let config_path = dirs::config_dir()?.join("gh").join("hosts.yml");
-    let contents = std::fs::read_to_string(config_path).ok()?;
+    // gh CLI stores its config at `~/.config/gh/hosts.yml` on every platform
+    // (XDG-style), not at `dirs::config_dir()/gh/...` — which on macOS resolves
+    // to `~/Library/Application Support/gh/`, where gh never writes. Try the
+    // XDG path first (covers the gh-on-macOS case), then $XDG_CONFIG_HOME if
+    // set, then fall back to `dirs::config_dir()` for any platform where gh
+    // does honor it.
+    let mut candidates: Vec<std::path::PathBuf> = Vec::with_capacity(3);
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(home.join(".config").join("gh").join("hosts.yml"));
+    }
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+        if !xdg.is_empty() {
+            candidates.push(std::path::PathBuf::from(xdg).join("gh").join("hosts.yml"));
+        }
+    }
+    if let Some(cfg) = dirs::config_dir() {
+        candidates.push(cfg.join("gh").join("hosts.yml"));
+    }
+
+    for path in candidates {
+        if let Some(token) = parse_gh_hosts_yaml(&path) {
+            return Some(token);
+        }
+    }
+    None
+}
+
+fn parse_gh_hosts_yaml(path: &std::path::Path) -> Option<String> {
+    let contents = std::fs::read_to_string(path).ok()?;
     let hosts: serde_yaml::Value = serde_yaml::from_str(&contents).ok()?;
     let github = hosts.get("github.com")?;
     if let Some(token) = github.get("oauth_token").and_then(|v| v.as_str()) {
