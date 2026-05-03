@@ -15,13 +15,22 @@ use super::Channel;
 
 lazy_static! {
     static ref CHANNEL_STATE: Mutex<ChannelState> = Mutex::new(ChannelState::init());
+    /// Runtime-overridable app version. Populated at startup from the macOS
+    /// bundle's `WarpVersion` Info.plist key (see `init_app_version_from_bundle`),
+    /// or by tests via `set_app_version`. When `None`, callers fall back to the
+    /// compile-time `option_env!("GIT_RELEASE_TAG")` baked into the binary.
+    ///
+    /// Letting the bundle override at runtime means a tag mismatch can be fixed
+    /// by re-running `update_plist` + re-signing the existing `.app`, rather
+    /// than recompiling — which on the free CI macOS runner takes 200+ min for
+    /// `release-lto`.
+    static ref APP_VERSION: Mutex<Option<&'static str>> = Mutex::new(None);
 }
 
 #[cfg(feature = "test-util")]
 lazy_static! {
     static ref MOCK_SERVER: mockito::ServerGuard = mockito::Server::new();
     static ref MOCK_SERVER_URL: String = MOCK_SERVER.url();
-    static ref APP_VERSION: Mutex<Option<&'static str>> = Mutex::new(None);
 }
 
 #[derive(Debug)]
@@ -318,21 +327,41 @@ impl ChannelState {
         CHANNEL_STATE.lock().channel
     }
 
-    #[cfg(feature = "test-util")]
+    /// Returns the current app version tag, preferring the runtime-injected
+    /// value (from the bundle plist or test setup) and falling back to the
+    /// compile-time `GIT_RELEASE_TAG` baked into the binary by `app/build.rs`.
     pub fn app_version() -> Option<&'static str> {
-        let version = APP_VERSION.lock();
-
-        version.or_else(|| option_env!("GIT_RELEASE_TAG"))
+        if let Some(v) = *APP_VERSION.lock() {
+            return Some(v);
+        }
+        option_env!("GIT_RELEASE_TAG")
     }
 
-    #[cfg(feature = "test-util")]
     pub fn set_app_version(version: Option<&'static str>) {
         *APP_VERSION.lock() = version;
     }
 
-    #[cfg(not(feature = "test-util"))]
-    pub fn app_version() -> Option<&'static str> {
-        option_env!("GIT_RELEASE_TAG")
+    /// Reads `WarpVersion` from the macOS app bundle's Info.plist and registers
+    /// it as the runtime app version. No-op on non-macOS, in tests, or when
+    /// the key is absent (e.g. `cargo run` with the embedded plist that doesn't
+    /// carry `WarpVersion`); callers fall through to the compile-time tag.
+    ///
+    /// Idempotent — safe to call multiple times; only the first non-empty read
+    /// wins. Leaks the read string to `'static` once per process; the cost is
+    /// ~30 bytes for the lifetime of the app.
+    pub fn init_app_version_from_bundle() {
+        #[cfg(all(target_os = "macos", not(feature = "test-util")))]
+        {
+            if APP_VERSION.lock().is_some() {
+                return;
+            }
+            if let Some(version) = read_warp_version_from_bundle() {
+                if !version.is_empty() {
+                    let leaked: &'static str = Box::leak(version.into_boxed_str());
+                    *APP_VERSION.lock() = Some(leaked);
+                }
+            }
+        }
     }
 
     pub fn sentry_url() -> Cow<'static, str> {
@@ -413,6 +442,34 @@ fn derive_http_origin_from_ws_url(ws_url: &str) -> Option<String> {
 #[cfg(all(test, not(feature = "test-util")))]
 #[path = "state_tests.rs"]
 mod tests;
+
+/// Reads the `WarpVersion` string from the main bundle's Info.plist on macOS.
+/// Wraps the call in an [`AutoreleasePoolGuard`] because this runs at app
+/// startup before AppKit's main event loop sets up the outer pool, so any
+/// `NSString` created here would otherwise leak.
+#[cfg(all(target_os = "macos", not(feature = "test-util")))]
+#[allow(deprecated)]
+fn read_warp_version_from_bundle() -> Option<String> {
+    use cocoa::base::{id, nil};
+    use cocoa::foundation::NSBundle;
+    use objc::{msg_send, sel, sel_impl};
+    use warpui::platform::mac::utils::nsstring_as_str;
+    use warpui::platform::mac::{make_nsstring, AutoreleasePoolGuard};
+
+    let _pool = AutoreleasePoolGuard::new();
+    unsafe {
+        let bundle = id::mainBundle();
+        if bundle == nil {
+            return None;
+        }
+        let key = make_nsstring("WarpVersion");
+        let value: id = msg_send![bundle, objectForInfoDictionaryKey: key];
+        if value == nil {
+            return None;
+        }
+        nsstring_as_str(value).ok().map(|s| s.to_string())
+    }
+}
 
 fn app_id_from_bundle() -> Option<AppId> {
     // On macOS, attempt to determine the app ID from the containing bundle,

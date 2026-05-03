@@ -27,6 +27,11 @@ fn main() -> Result<()> {
         state = state.with_additional_features(warp_core::features::DEBUG_FLAGS);
     }
     ChannelState::set(state);
+    // Pull the version tag from the bundle plist (`WarpVersion`) so a CI tag
+    // mismatch can be fixed by re-running `update_plist` + re-signing the
+    // existing `.app` instead of a 200+ min `release-lto` recompile. Falls
+    // through to the compile-time `GIT_RELEASE_TAG` when the key is absent.
+    ChannelState::init_app_version_from_bundle();
 
     warp::run()
 }
