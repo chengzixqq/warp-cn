@@ -9,7 +9,7 @@ use super::{
 };
 use crate::auth::{AuthStateProvider, UserUid};
 use crate::autoupdate::{self, AutoupdateStage, AutoupdateState};
-use crate::github_update::GithubUpdateState;
+use crate::github_update::{GithubUpdateState, InstallableRelease};
 use crate::send_telemetry_from_ctx;
 use crate::workspaces::user_workspaces::UserWorkspaces;
 use crate::{
@@ -122,6 +122,7 @@ pub enum MainPageAction {
     DownloadUpdate,
     CheckForUpdate,
     CheckGithubUpdate,
+    InstallGithubUpdate(InstallableRelease),
     ToggleSettingsSync,
     Upgrade {
         team_uid: Option<ServerId>,
@@ -206,6 +207,9 @@ impl TypedActionView for MainSettingsPageView {
             }
             MainPageAction::CheckGithubUpdate => {
                 GithubUpdateState::trigger_check(ctx);
+            }
+            MainPageAction::InstallGithubUpdate(target) => {
+                GithubUpdateState::trigger_install(ctx, target.clone());
             }
             MainPageAction::ToggleSettingsSync => {
                 let new_value =
@@ -1122,7 +1126,11 @@ impl GithubVersionInfoWidget {
                     action: MainPageAction::CheckGithubUpdate,
                 }),
             ),
-            GithubUpdateState::UpdateAvailable { tag, html_url } => (
+            GithubUpdateState::UpdateAvailable {
+                tag,
+                html_url,
+                installable,
+            } => (
                 Some(StatusContent {
                     text: warp_i18n::t!(
                         "settings-account-update-available-version",
@@ -1130,10 +1138,40 @@ impl GithubVersionInfoWidget {
                     ),
                     color: ansi_red,
                 }),
-                Some(CallToActionContent {
-                    text: warp_i18n::t!("settings-account-open-on-github"),
-                    action: MainPageAction::OpenUrl(html_url.clone()),
+                // If the release ships a signed tarball and this build has a
+                // baked pubkey, surface the in-app installer; otherwise fall
+                // back to the browser link so users can still upgrade by
+                // hand.
+                Some(match installable.clone() {
+                    Some(target) => CallToActionContent {
+                        text: warp_i18n::t!("settings-account-download-and-install"),
+                        action: MainPageAction::InstallGithubUpdate(target),
+                    },
+                    None => CallToActionContent {
+                        text: warp_i18n::t!("settings-account-open-on-github"),
+                        action: MainPageAction::OpenUrl(html_url.clone()),
+                    },
                 }),
+            ),
+            GithubUpdateState::Downloading { tag } => (
+                Some(StatusContent {
+                    text: warp_i18n::t!(
+                        "settings-account-downloading-update",
+                        version = tag.clone()
+                    ),
+                    color: faded_text_color,
+                }),
+                None,
+            ),
+            GithubUpdateState::Installing { tag } => (
+                Some(StatusContent {
+                    text: warp_i18n::t!(
+                        "settings-account-installing-update",
+                        version = tag.clone()
+                    ),
+                    color: faded_text_color,
+                }),
+                None,
             ),
             GithubUpdateState::Error => (
                 Some(StatusContent {

@@ -14,6 +14,24 @@
 
 切换不需要重启 Warp。设置项位于 `~/.warp/settings.toml` 的 `language` 字段。
 
+## 自动更新（无需 Apple Developer ID）
+
+本 fork 通过 GitHub Releases 实现客户端自更新，**不依赖任何后端服务器**。机制：
+
+- CI 在打 `v*` tag 时产出 `.tar.gz` + `.minisig` 资产，使用 minisign 私钥签名（私钥仅存在于 GitHub Actions Secret）。
+- 客户端启动后到 **设置 → 账户 → 版本**，点击 **下载并安装**，进程内通过 `reqwest` 拉取并验签，`tar` 解压后原地替换、重启。
+- 进程内下载不会附加 `com.apple.quarantine`，因此 ad-hoc 签名的 `.app` 替换后 Gatekeeper 不会重新评估，更新对用户静默。
+
+**首次安装** 是唯一需要手动操作的一次（macOS 不允许应用绕过 Gatekeeper 自我授权）：
+
+```bash
+xattr -dr com.apple.quarantine /path/to/Warp-cn.app
+```
+
+或在 系统设置 → 隐私与安全性 中点击「仍要打开」。**之后所有自动更新永久静默生效。**
+
+> 维护者 fork 后首次启用更新通道：执行 `script/generate_update_keys.sh` 生成 minisign 密钥对，将公钥提交到仓库（`script/warp-update.pub`），私钥放入 GitHub Actions Secret `MINISIGN_SECRET_KEY`。
+
 ## 与上游同步
 
 本 fork 维护者会定期 merge upstream。每个含 UI 字符串的 PR 拆为两步：
