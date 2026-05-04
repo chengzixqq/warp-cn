@@ -1,0 +1,19 @@
+[package]
+name = "warp_index_bridge"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "MCP stdio server exposing Warp's local codebase-index metadata to external consumers (Claude Code etc.)"
+
+[[bin]]
+name = "warp-index-bridge"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+rmcp = { workspace = true, features = ["server", "transport-io"] }
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "io-std"] }
+warp_core.workspace = true

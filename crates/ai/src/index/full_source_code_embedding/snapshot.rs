@@ -187,6 +187,11 @@ pub(super) fn snapshot_dir() -> Option<PathBuf> {
 }
 
 /// Constructs a snapshot path given a base directory and the codebase index's root path.
+///
+/// NOTE: warp-cn `crates/warp_index_bridge/src/main.rs::digest_for_repo_path`
+/// duplicates this hashing convention so an external bridge MCP can correlate
+/// snapshot files back to repos without depending on this crate. Update both
+/// sites simultaneously when changing the algorithm.
 pub(super) fn snapshot_path(snapshot_dir: &Path, repo_path: &Path) -> PathBuf {
     // Use a hash the repo_path to create a unique filename
     let mut hasher = DefaultHasher::new();

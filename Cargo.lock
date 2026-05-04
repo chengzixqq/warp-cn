@@ -15068,6 +15068,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "warp_index_bridge"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "rmcp",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tokio",
+ "warp_core",
+]
+
+[[package]]
 name = "warp_isolation_platform"
 version = "0.1.0"
 dependencies = [
