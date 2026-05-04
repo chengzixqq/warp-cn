@@ -15,13 +15,18 @@
 use anyhow::{anyhow, bail, Context as _, Result};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use warp_core::channel::ChannelState;
 use warp_core::paths;
-use warpui::{AppContext, Entity, SingletonEntity};
+use warpui::{AppContext, Entity, ModelContext, SingletonEntity, Timer};
 
+mod auto_check;
 #[cfg(target_os = "macos")]
 mod install;
+
+pub(crate) use auto_check::register as register_auto_check;
 
 const REPO_API_URL: &str = "https://api.github.com/repos/Heartcoolman/warp-cn/releases/latest";
 const REPO_RELEASES_URL: &str = "https://github.com/Heartcoolman/warp-cn/releases";
@@ -58,12 +63,15 @@ pub enum GithubUpdateState {
         html_url: String,
         installable: Option<InstallableRelease>,
     },
-    /// Tarball is being fetched + verified. UI shows an indeterminate spinner;
-    /// granular progress is intentionally deferred — release tarballs are
-    /// small (~50-150 MB) and the operation completes in seconds on a normal
-    /// connection.
+    /// Tarball is being fetched + verified. `downloaded_bytes` is updated
+    /// every ~250ms by a ticker that polls a shared atomic written by the
+    /// install future's stream loop. `total_bytes` is `None` until the HTTP
+    /// response's `Content-Length` is known (almost always present for
+    /// GitHub release-asset redirects).
     Downloading {
         tag: String,
+        downloaded_bytes: u64,
+        total_bytes: Option<u64>,
     },
     /// Verification done; about to swap and relaunch. The current process
     /// will `exit(0)` very shortly after entering this state, so the user
@@ -134,21 +142,32 @@ impl GithubUpdateState {
                 return;
             }
             let tag = target.tag.clone();
-            *state = Self::Downloading { tag: tag.clone() };
+            let progress = Arc::new(AtomicU64::new(0));
+            let total = Arc::new(AtomicU64::new(0));
+            let done = Arc::new(AtomicBool::new(false));
+
+            *state = Self::Downloading {
+                tag: tag.clone(),
+                downloaded_bytes: 0,
+                total_bytes: None,
+            };
             ctx.notify();
 
             let install_target = target.clone();
+            let install_tag = tag.clone();
+            let progress_w = progress.clone();
+            let total_w = total.clone();
+            let done_w = done.clone();
             ctx.spawn(
-                async move { install::run_install(install_target).await },
+                async move {
+                    let r = install::run_install(install_target, progress_w, total_w).await;
+                    done_w.store(true, AtomicOrdering::SeqCst);
+                    r
+                },
                 move |state, result, ctx| {
                     match result {
                         Ok(()) => {
-                            // run_install returns Ok only if the helper has
-                            // already been spawned and we are seconds away
-                            // from process exit. Surface the transient
-                            // Installing state so the UI can swap to a
-                            // "Relaunching..." label.
-                            *state = Self::Installing { tag: tag.clone() };
+                            *state = Self::Installing { tag: install_tag };
                         }
                         Err(err) => {
                             log::error!("GitHub update install failed: {err:#}");
@@ -158,7 +177,47 @@ impl GithubUpdateState {
                     ctx.notify();
                 },
             );
+
+            // Re-entrant ticker that reflects atomic counters into model
+            // state every ~250ms. Stops when `done` flips true (set by the
+            // install future just before its callback fires) or when state
+            // moves out of Downloading{tag}.
+            Self::schedule_progress_tick(ctx, tag, progress, total, done);
         });
+    }
+
+    #[cfg(target_os = "macos")]
+    fn schedule_progress_tick(
+        ctx: &mut ModelContext<Self>,
+        tag: String,
+        progress: Arc<AtomicU64>,
+        total: Arc<AtomicU64>,
+        done: Arc<AtomicBool>,
+    ) {
+        if done.load(AtomicOrdering::SeqCst) {
+            return;
+        }
+        ctx.spawn(
+            async move {
+                Timer::after(Duration::from_millis(250)).await;
+            },
+            move |state, _, ctx| {
+                if let Self::Downloading {
+                    tag: cur_tag,
+                    downloaded_bytes,
+                    total_bytes,
+                } = state
+                {
+                    if cur_tag == &tag {
+                        *downloaded_bytes = progress.load(AtomicOrdering::SeqCst);
+                        let t = total.load(AtomicOrdering::SeqCst);
+                        *total_bytes = if t > 0 { Some(t) } else { None };
+                        ctx.notify();
+                    }
+                }
+                Self::schedule_progress_tick(ctx, tag, progress, total, done);
+            },
+        );
     }
 
     #[cfg(not(target_os = "macos"))]

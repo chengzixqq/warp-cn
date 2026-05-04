@@ -1823,6 +1823,11 @@ fn initialize_app(
     // a successful swap. Once the new bundle has booted to this point we
     // can safely drop it; macOS-only and best-effort.
     crate::github_update::cleanup_previous_install();
+    // Schedules a one-shot version check 5s after init. When `GithubUpdateState`
+    // transitions to `UpdateAvailable`, surfaces a persistent toast in the
+    // active window (at most once per session). Dismiss → next launch re-checks
+    // and re-notifies. Click → user opens Settings → About to start the install.
+    crate::github_update::register_auto_check(ctx);
 
     ctx.add_singleton_model(LocalWorkflows::new);
 

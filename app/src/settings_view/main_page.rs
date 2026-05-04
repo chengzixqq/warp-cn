@@ -1153,16 +1153,30 @@ impl GithubVersionInfoWidget {
                     },
                 }),
             ),
-            GithubUpdateState::Downloading { tag } => (
-                Some(StatusContent {
-                    text: warp_i18n::t!(
-                        "settings-account-downloading-update",
-                        version = tag.clone()
-                    ),
-                    color: faded_text_color,
-                }),
-                None,
-            ),
+            GithubUpdateState::Downloading {
+                tag,
+                downloaded_bytes,
+                total_bytes,
+            } => {
+                let percent_str = match total_bytes {
+                    Some(total) if *total > 0 => {
+                        let pct = ((*downloaded_bytes).saturating_mul(100) / *total).min(100);
+                        format!(" ({pct}%)")
+                    }
+                    _ => String::new(),
+                };
+                (
+                    Some(StatusContent {
+                        text: warp_i18n::t!(
+                            "settings-account-downloading-update",
+                            version = tag.clone(),
+                            percent = percent_str,
+                        ),
+                        color: faded_text_color,
+                    }),
+                    None,
+                )
+            }
             GithubUpdateState::Installing { tag } => (
                 Some(StatusContent {
                     text: warp_i18n::t!(

@@ -29,19 +29,22 @@
 //!   * Signature verification failure → never extract, never write.
 //!   * Tar/codesign failure → leaves the prior install intact.
 //!
-//! No granular progress reporting in this iteration — release tarballs are
-//! ~50–150 MB and complete in seconds. Adding a stream-based progress
-//! callback later is mechanical (replace `bytes()` with `bytes_stream` and
-//! a counter that nudges entity state via `ctx.spawn` ticks).
+//! Tarball download streams via `bytes_stream` and increments shared atomic
+//! counters (`progress`, `total`) in chunk-sized steps. The companion ticker
+//! in [`super::GithubUpdateState::schedule_progress_tick`] reads those atomics
+//! every ~250 ms and reflects them into model state for the UI.
 
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, bail, Context as _, Result};
+use futures::StreamExt as _;
 use minisign_verify::{PublicKey, Signature};
 use warp_core::paths;
 
@@ -50,7 +53,11 @@ use super::InstallableRelease;
 const REQUEST_TIMEOUT_SECS: u64 = 300; // tarballs ~ 50-150 MB; allow slow links
 const USER_AGENT: &str = "warp-cn-update-install/0.1";
 
-pub(super) async fn run_install(target: InstallableRelease) -> Result<()> {
+pub(super) async fn run_install(
+    target: InstallableRelease,
+    progress: Arc<AtomicU64>,
+    total: Arc<AtomicU64>,
+) -> Result<()> {
     let pubkey_str = option_env!("WARP_UPDATE_PUBKEY")
         .filter(|s| !s.is_empty())
         .ok_or_else(|| {
@@ -66,10 +73,11 @@ pub(super) async fn run_install(target: InstallableRelease) -> Result<()> {
     let tarball = staging.join("warp.tar.gz");
     let sig = staging.join("warp.tar.gz.minisig");
 
-    download_to(&target.asset_url, &tarball)
+    download_with_progress(&target.asset_url, &tarball, &progress, &total)
         .await
         .context("download tarball")?;
-    download_to(&target.sig_url, &sig)
+    // Signature is a few KB; progress UI stays at 100% during this brief step.
+    download_simple(&target.sig_url, &sig)
         .await
         .context("download signature")?;
 
@@ -158,7 +166,47 @@ fn sanitize_for_path(s: &str) -> String {
         .collect()
 }
 
-async fn download_to(url: &str, dest: &Path) -> Result<()> {
+/// Streams the response body to `dest` chunk-by-chunk, incrementing the
+/// shared `progress` counter and (once) writing `Content-Length` into
+/// `total`. The model-side ticker reads both atomics to drive the UI %.
+async fn download_with_progress(
+    url: &str,
+    dest: &Path,
+    progress: &Arc<AtomicU64>,
+    total: &Arc<AtomicU64>,
+) -> Result<()> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
+        .build()
+        .context("reqwest client")?;
+    let resp = client
+        .get(url)
+        .header(reqwest::header::USER_AGENT, USER_AGENT)
+        .send()
+        .await
+        .with_context(|| format!("GET {url}"))?
+        .error_for_status()
+        .with_context(|| format!("status {url}"))?;
+
+    if let Some(len) = resp.content_length() {
+        total.store(len, Ordering::SeqCst);
+    }
+
+    let mut file = fs::File::create(dest)
+        .with_context(|| format!("create {}", dest.display()))?;
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.with_context(|| format!("read body chunk {url}"))?;
+        file.write_all(&chunk)
+            .with_context(|| format!("write {}", dest.display()))?;
+        progress.fetch_add(chunk.len() as u64, Ordering::SeqCst);
+    }
+    Ok(())
+}
+
+/// One-shot download for tiny files (signature, etc.) where progress UX is
+/// not worth the extra plumbing.
+async fn download_simple(url: &str, dest: &Path) -> Result<()> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
         .build()
