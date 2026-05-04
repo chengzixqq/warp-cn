@@ -1095,6 +1095,9 @@ impl CodePageWidget {
             .build()
             .finish();
 
+        let is_auggie_backend =
+            crate::ai::codebase_index_backend::is_local_codebase_index_backend(app);
+
         let switch = ui_builder
             .switch(self.switch_state.clone())
             .check(UserWorkspaces::as_ref(app).is_codebase_context_enabled(app));
@@ -1106,7 +1109,8 @@ impl CodePageWidget {
             AdminEnablementSetting::Disable => {
                 Some(warp_i18n::t!("settings-code-indexing-disabled-admin").to_string())
             }
-            AdminEnablementSetting::RespectUserSetting if !global_ai_enabled => {
+            // Auggie backend bypasses the global-AI gate (no Warp account required).
+            AdminEnablementSetting::RespectUserSetting if !global_ai_enabled && !is_auggie_backend => {
                 Some(warp_i18n::t!("settings-code-indexing-disabled-global-ai").to_string())
             }
             AdminEnablementSetting::RespectUserSetting => None,

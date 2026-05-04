@@ -23,6 +23,15 @@ settings-code-indexing-workspace-enabled-admin = Team admins have enabled codeba
 settings-code-indexing-disabled-global-ai = AI Features must be enabled to use codebase indexing.
 settings-code-index-limit-reached = You have reached the maximum number of codebase indices for your plan. Delete existing indices to auto-index new codebases.
 
+# Auggie backend (warp-cn)
+settings-code-indexing-backend-cloud = Backend: Warp Cloud
+settings-code-indexing-backend-auggie = Backend: Auggie (local)
+settings-code-indexing-backend-auggie-running = Running on Auggie MCP
+settings-code-indexing-backend-auggie-starting = Starting Auggie...
+settings-code-indexing-backend-auggie-unavailable = Auggie unavailable
+settings-code-indexing-disabled-auggie-unavailable = Start auggie or configure AUGMENT_SESSION_AUTH to use local codebase indexing.
+settings-code-codebase-index-description-auggie = Warp builds the local index and retrieves code context through your Auggie MCP server. No data is sent to Warp servers.
+
 # Index folder action button
 settings-code-index-new-folder = Index new folder
 
