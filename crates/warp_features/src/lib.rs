@@ -956,6 +956,8 @@ pub const RELEASE_FLAGS: &[FeatureFlag] = &[
     // Remote server binary is not yet supported on Windows.
     #[cfg(not(windows))]
     FeatureFlag::SshRemoteServer,
+    // warp-cn fork: surface the agent toolbar layout editor in all release builds.
+    FeatureFlag::AgentToolbarEditor,
 ];
 
 /// Flags that we want to allow to switch at runtime (assuming RuntimeFeatureFlags is set)
