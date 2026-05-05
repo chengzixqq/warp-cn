@@ -15072,6 +15072,7 @@ name = "warp_index_bridge"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "dunce",
  "rmcp",
  "schemars",
  "serde",

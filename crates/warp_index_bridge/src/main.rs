@@ -36,7 +36,7 @@ use std::time::SystemTime;
 
 use anyhow::Result;
 use rmcp::handler::server::router::tool::ToolRouter;
-use rmcp::handler::server::tool::Parameters;
+use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
     CallToolResult, Content, Implementation, ProtocolVersion, ServerCapabilities, ServerInfo,
 };

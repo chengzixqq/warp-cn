@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
+dunce.workspace = true
 rmcp = { workspace = true, features = ["server", "transport-io"] }
 schemars.workspace = true
 serde.workspace = true
