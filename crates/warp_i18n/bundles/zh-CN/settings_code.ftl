@@ -52,6 +52,25 @@ settings-code-status-stale = 已过期
 settings-code-status-failed = 失败
 settings-code-status-no-index-built = 未建立索引
 
+# 索引使用情况报告（状态行下方的统计条）
+settings-code-stats-files = {$count} 个文件
+settings-code-stats-chunks = {$count} 个片段
+settings-code-stats-bytes = {$size}
+settings-code-stats-synced = 同步于 {$ago}
+settings-code-stats-queried = 已查询 {$count} 次 · 最近 {$ago}
+settings-code-stats-just-now = 刚刚
+settings-code-stats-minutes-ago = {$minutes} 分钟前
+settings-code-stats-hours-ago = {$hours} 小时前
+settings-code-stats-days-ago = {$days} 天前
+
+# 上次同步失败原因（取代统计条显示）
+settings-code-error-build-tree = 索引构建失败。
+settings-code-error-too-many-files = 代码库超出文件数上限。
+settings-code-error-max-depth = 代码库目录层级过深。
+settings-code-error-embedding = 有 {$count} 个片段嵌入生成失败。
+settings-code-error-sync = 有 {$count} 个中间节点同步失败。
+settings-code-error-other = {$reason}
+
 # LSP servers section
 settings-code-lsp-servers-section = LSP 服务器
 settings-code-lsp-installed = 已安装

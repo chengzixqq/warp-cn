@@ -42,6 +42,7 @@ use ai::index::full_source_code_embedding::manager::{
 use ai::index::full_source_code_embedding::SyncProgress;
 use ai::project_context::model::{ProjectContextModel, ProjectContextModelEvent};
 use ai::workspace::WorkspaceMetadata;
+use chrono::{DateTime, Utc};
 use lsp::supported_servers::LSPServerType;
 use lsp::{LspManagerModel, LspManagerModelEvent, LspServerModel, LspState};
 use pathfinder_color::ColorU;
@@ -869,6 +870,114 @@ struct CodePageWidget {
 /// new `CodebaseIndexingCategorizedWidget`. Returns `None` when the toggle
 /// should be interactive. Auggie collapses every cloud admin/global-AI arm
 /// down to a single "MCP unavailable" tooltip (or `None` when optimistic).
+/// Composes the dim metadata bar shown beneath the indexing status row.
+/// Returns `None` when the index has neither completed a sync nor failed.
+fn build_index_stats_line(
+    workspace: &WorkspaceMetadata,
+    last_sync_result: Option<&CodebaseIndexFinishedStatus>,
+) -> Option<String> {
+    if let Some(CodebaseIndexFinishedStatus::Failed(err)) = last_sync_result {
+        return Some(error_reason_text(err));
+    }
+
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(n) = workspace.file_count {
+        parts.push(warp_i18n::t!("settings-code-stats-files", count = n));
+    }
+    if let Some(n) = workspace.fragment_count {
+        parts.push(warp_i18n::t!("settings-code-stats-chunks", count = n));
+    }
+    if let Some(b) = workspace.index_bytes {
+        parts.push(humanize_bytes_label(b));
+    }
+    if let Some(ts) = workspace.synced_at {
+        parts.push(warp_i18n::t!(
+            "settings-code-stats-synced",
+            ago = relative_time_label(ts)
+        ));
+    }
+    if workspace.query_count > 0 {
+        let last = workspace
+            .queried_ts
+            .map(relative_time_label)
+            .unwrap_or_default();
+        parts.push(warp_i18n::t!(
+            "settings-code-stats-queried",
+            count = workspace.query_count,
+            ago = last
+        ));
+    }
+    (!parts.is_empty()).then(|| parts.join(" · "))
+}
+
+fn humanize_bytes_label(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+    let formatted = if bytes < KB {
+        format!("{} B", bytes)
+    } else if bytes < MB {
+        format!("{:.1} KB", bytes as f64 / KB as f64)
+    } else if bytes < GB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else {
+        format!("{:.1} GB", bytes as f64 / GB as f64)
+    };
+    warp_i18n::t!("settings-code-stats-bytes", size = formatted)
+}
+
+fn relative_time_label(ts: DateTime<Utc>) -> String {
+    let secs = Utc::now().signed_duration_since(ts).num_seconds().max(0);
+    if secs < 60 {
+        warp_i18n::t!("settings-code-stats-just-now")
+    } else if secs < 3_600 {
+        warp_i18n::t!("settings-code-stats-minutes-ago", minutes = secs / 60)
+    } else if secs < 86_400 {
+        warp_i18n::t!("settings-code-stats-hours-ago", hours = secs / 3_600)
+    } else {
+        warp_i18n::t!("settings-code-stats-days-ago", days = secs / 86_400)
+    }
+}
+
+/// Squeezes a free-form error message down to one short line so the metadata
+/// bar never balloons across multiple rows. Falls back to "(no error message)"
+/// when the source is empty.
+const ERROR_REASON_MAX_LEN: usize = 200;
+
+fn truncate_error_reason(raw: &str) -> String {
+    let first_line = raw.lines().next().unwrap_or("").trim();
+    if first_line.is_empty() {
+        return "(no error message)".to_string();
+    }
+    if first_line.chars().count() <= ERROR_REASON_MAX_LEN {
+        return first_line.to_string();
+    }
+    let truncated: String = first_line.chars().take(ERROR_REASON_MAX_LEN).collect();
+    format!("{truncated}…")
+}
+
+fn error_reason_text(err: &CodebaseIndexingError) -> String {
+    match err {
+        CodebaseIndexingError::BuildTreeError => warp_i18n::t!("settings-code-error-build-tree"),
+        CodebaseIndexingError::ExceededMaxFileLimit => {
+            warp_i18n::t!("settings-code-error-too-many-files")
+        }
+        CodebaseIndexingError::MaxDepthExceeded => warp_i18n::t!("settings-code-error-max-depth"),
+        CodebaseIndexingError::FailedToGenerateEmbeddings(metas) => {
+            warp_i18n::t!("settings-code-error-embedding", count = metas.len())
+        }
+        CodebaseIndexingError::FailedToSyncIntermediateNodes(hashes) => {
+            warp_i18n::t!("settings-code-error-sync", count = hashes.len())
+        }
+        CodebaseIndexingError::Other(e) => {
+            warp_i18n::t!(
+                "settings-code-error-other",
+                reason = truncate_error_reason(&e.to_string())
+            )
+        }
+    }
+}
+
 fn codebase_indexing_disabled_tooltip(
     admin_setting: AdminEnablementSetting,
     global_ai_enabled: bool,
@@ -1303,7 +1412,7 @@ impl CodePageWidget {
                 .unwrap_or_default();
 
             content.add_child(self.render_workspace_row(
-                workspace_path,
+                workspace,
                 index_status.as_ref(),
                 &all_servers,
                 lsp_manager,
@@ -1324,7 +1433,7 @@ impl CodePageWidget {
     #[allow(clippy::too_many_arguments)]
     fn render_workspace_row(
         &self,
-        workspace_path: &Path,
+        workspace: &WorkspaceMetadata,
         index_status: Option<&CodebaseIndexStatus>,
         all_servers: &[(LSPServerType, EnablementState)],
         lsp_manager: &LspManagerModel,
@@ -1338,6 +1447,7 @@ impl CodePageWidget {
     ) -> Box<dyn Element> {
         let ui_builder = appearance.ui_builder();
         let theme = appearance.theme();
+        let workspace_path = workspace.path.as_path();
 
         let mut workspace_content = Flex::column().with_spacing(MAIN_SECTION_MARGIN);
 
@@ -1423,7 +1533,7 @@ impl CodePageWidget {
 
         // Indexing section (always rendered per design)
         workspace_content.add_child(self.render_indexing_subsection(
-            workspace_path,
+            workspace,
             index_status,
             resync_mouse,
             delete_mouse,
@@ -1454,7 +1564,7 @@ impl CodePageWidget {
     /// Renders the indexing subsection within a workspace row.
     fn render_indexing_subsection(
         &self,
-        workspace_path: &Path,
+        workspace: &WorkspaceMetadata,
         index_status: Option<&CodebaseIndexStatus>,
         resync_mouse: MouseStateHandle,
         delete_mouse: MouseStateHandle,
@@ -1462,6 +1572,7 @@ impl CodePageWidget {
     ) -> Box<dyn Element> {
         let ui_builder = appearance.ui_builder();
         let theme = appearance.theme();
+        let workspace_path = workspace.path.as_path();
 
         let mut column = Flex::column().with_spacing(SUB_SECTION_MARGIN);
 
@@ -1498,6 +1609,24 @@ impl CodePageWidget {
                     .with_child(action_buttons)
                     .finish(),
             );
+
+            // Metadata bar: "{N} files · {M} chunks · {SIZE} · synced {ago} · queried N times, last {ago}"
+            // Failure reason replaces the bar when last sync errored.
+            if let Some(stats_line) =
+                build_index_stats_line(workspace, index_status.last_sync_result())
+            {
+                column.add_child(
+                    ui_builder
+                        .label(stats_line)
+                        .with_style(UiComponentStyles {
+                            font_size: Some(11.5),
+                            font_color: Some(theme.disabled_ui_text_color().into()),
+                            ..Default::default()
+                        })
+                        .build()
+                        .finish(),
+                );
+            }
         } else {
             // No index exists for this workspace
             let status_color = theme.disabled_ui_text_color().into_solid();
@@ -2545,5 +2674,151 @@ impl SettingsWidget for GlobalSearchToggleWidget {
                 .finish(),
             Some(warp_i18n::t!("settings-code-global-search-desc").to_string()),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Duration as ChronoDuration;
+    use serial_test::serial;
+
+    fn ensure_en() {
+        let _ = warp_i18n::init(warp_i18n::Locale::En);
+        warp_i18n::set_locale(warp_i18n::Locale::En);
+    }
+
+    fn workspace_with(
+        synced_at: Option<DateTime<Utc>>,
+        queried_ts: Option<DateTime<Utc>>,
+        query_count: u32,
+    ) -> WorkspaceMetadata {
+        WorkspaceMetadata {
+            path: PathBuf::from("/tmp/test-repo"),
+            file_count: Some(123),
+            fragment_count: Some(456),
+            index_bytes: Some(2 * 1024),
+            synced_at,
+            queried_ts,
+            query_count,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn truncate_error_reason_passes_through_short_text() {
+        assert_eq!(truncate_error_reason("oops"), "oops");
+    }
+
+    #[test]
+    fn truncate_error_reason_takes_first_line_only() {
+        assert_eq!(
+            truncate_error_reason("first failure\nsecond line\nthird"),
+            "first failure"
+        );
+    }
+
+    #[test]
+    fn truncate_error_reason_caps_long_messages_with_ellipsis() {
+        let long = "a".repeat(ERROR_REASON_MAX_LEN + 50);
+        let out = truncate_error_reason(&long);
+        assert!(out.ends_with('…'));
+        assert_eq!(out.chars().count(), ERROR_REASON_MAX_LEN + 1);
+    }
+
+    #[test]
+    fn truncate_error_reason_handles_empty_and_blank() {
+        assert_eq!(truncate_error_reason(""), "(no error message)");
+        assert_eq!(truncate_error_reason("   \n  "), "(no error message)");
+    }
+
+    #[test]
+    #[serial]
+    fn humanize_bytes_label_picks_correct_unit() {
+        ensure_en();
+        assert!(humanize_bytes_label(0).contains("0 B"));
+        assert!(humanize_bytes_label(512).contains("512 B"));
+        assert!(humanize_bytes_label(1024).contains("1.0 KB"));
+        assert!(humanize_bytes_label(1024 * 1024).contains("1.0 MB"));
+        assert!(humanize_bytes_label(1024u64 * 1024 * 1024).contains("1.0 GB"));
+    }
+
+    #[test]
+    #[serial]
+    fn relative_time_label_walks_through_buckets() {
+        ensure_en();
+        let now = Utc::now();
+        assert!(relative_time_label(now - ChronoDuration::seconds(30)).contains("just now"));
+        assert!(relative_time_label(now - ChronoDuration::minutes(5)).contains("5"));
+        assert!(relative_time_label(now - ChronoDuration::hours(2)).contains("2"));
+        assert!(relative_time_label(now - ChronoDuration::days(3)).contains("3"));
+    }
+
+    #[test]
+    #[serial]
+    fn build_index_stats_line_returns_none_when_never_synced() {
+        ensure_en();
+        let ws = WorkspaceMetadata {
+            path: PathBuf::from("/tmp/empty"),
+            ..Default::default()
+        };
+        assert_eq!(build_index_stats_line(&ws, None), None);
+    }
+
+    #[test]
+    #[serial]
+    fn build_index_stats_line_includes_all_present_fields() {
+        ensure_en();
+        let ws = workspace_with(Some(Utc::now()), Some(Utc::now()), 3);
+        let line = build_index_stats_line(&ws, Some(&CodebaseIndexFinishedStatus::Completed))
+            .expect("expected stats line");
+        assert!(line.contains("123"), "missing file count: {line}");
+        assert!(line.contains("456"), "missing fragment count: {line}");
+        assert!(line.contains("KB"), "missing bytes label: {line}");
+        assert!(line.contains("synced"), "missing synced label: {line}");
+        assert!(line.contains("queried"), "missing queried label: {line}");
+        assert!(line.contains(" · "), "missing separator: {line}");
+    }
+
+    #[test]
+    #[serial]
+    fn build_index_stats_line_skips_query_section_when_count_zero() {
+        ensure_en();
+        let ws = workspace_with(Some(Utc::now()), None, 0);
+        let line = build_index_stats_line(&ws, Some(&CodebaseIndexFinishedStatus::Completed))
+            .expect("stats line");
+        assert!(!line.contains("queried"), "should not show queried: {line}");
+    }
+
+    #[test]
+    #[serial]
+    fn build_index_stats_line_replaces_with_error_when_failed() {
+        ensure_en();
+        let ws = workspace_with(Some(Utc::now()), None, 0);
+        let err = CodebaseIndexFinishedStatus::Failed(CodebaseIndexingError::ExceededMaxFileLimit);
+        let line = build_index_stats_line(&ws, Some(&err)).expect("error line");
+        // Must NOT include the stats fields when failed.
+        assert!(!line.contains("123"), "stats leaked into error line: {line}");
+        assert!(!line.contains(" · "), "separator leaked into error line: {line}");
+    }
+
+    #[test]
+    #[serial]
+    fn error_reason_text_covers_all_variants() {
+        ensure_en();
+        assert!(!error_reason_text(&CodebaseIndexingError::BuildTreeError).is_empty());
+        assert!(!error_reason_text(&CodebaseIndexingError::ExceededMaxFileLimit).is_empty());
+        assert!(!error_reason_text(&CodebaseIndexingError::MaxDepthExceeded).is_empty());
+        assert!(
+            !error_reason_text(&CodebaseIndexingError::FailedToGenerateEmbeddings(vec![]))
+                .is_empty()
+        );
+        assert!(
+            !error_reason_text(&CodebaseIndexingError::FailedToSyncIntermediateNodes(vec![]))
+                .is_empty()
+        );
+        let other_msg =
+            error_reason_text(&CodebaseIndexingError::Other(anyhow::anyhow!("disk full")));
+        assert!(other_msg.contains("disk full"), "other reason: {other_msg}");
     }
 }

@@ -52,6 +52,25 @@ settings-code-status-stale = Stale
 settings-code-status-failed = Failed
 settings-code-status-no-index-built = No index built
 
+# Index usage report ("metadata bar" beneath the status row)
+settings-code-stats-files = {$count} files
+settings-code-stats-chunks = {$count} chunks
+settings-code-stats-bytes = {$size}
+settings-code-stats-synced = synced {$ago}
+settings-code-stats-queried = queried {$count}× · last {$ago}
+settings-code-stats-just-now = just now
+settings-code-stats-minutes-ago = {$minutes}m ago
+settings-code-stats-hours-ago = {$hours}h ago
+settings-code-stats-days-ago = {$days}d ago
+
+# Indexing failure reasons (shown in the metadata bar when last sync failed)
+settings-code-error-build-tree = Failed to build the index tree.
+settings-code-error-too-many-files = Codebase exceeds the file count limit.
+settings-code-error-max-depth = Codebase exceeds the maximum directory depth.
+settings-code-error-embedding = Failed to generate embeddings for {$count} fragments.
+settings-code-error-sync = Failed to sync {$count} intermediate nodes.
+settings-code-error-other = {$reason}
+
 # LSP servers section
 settings-code-lsp-servers-section = LSP SERVERS
 settings-code-lsp-installed = Installed
