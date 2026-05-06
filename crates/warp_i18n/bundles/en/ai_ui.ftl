@@ -187,7 +187,6 @@ ai-ui-context-window-label = Context window
 ai-ui-context-window-desc = The base model's working memory — how many tokens of your conversation, code, and documents it can consider at once. Larger windows enable longer conversations and more coherent responses over bigger codebases, at the cost of higher latency and compute usage.
 
 # Ambient (cloud) agent UI
-ai-ui-ambient-failed = Failed
 ai-ui-ambient-start-cloud-agent = Start a new Oz cloud agent
 ai-ui-ambient-cloud-env-intro = Cloud agents require an environment that they'll run in to get their task done. Create your first environment below. You'll be able to edit the environment later, or add new environments when you need them.
 ai-ui-ambient-free-credits = Free credits

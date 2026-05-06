@@ -14,6 +14,7 @@ use warpui::r#async::executor;
 
 use remote_server::auth::RemoteServerAuthContext;
 use remote_server::client::RemoteServerClient;
+use remote_server::manager::RemoteServerExitStatus;
 use remote_server::setup::{
     parse_uname_output, remote_server_daemon_dir, PreinstallCheckResult, RemotePlatform,
 };
@@ -284,29 +285,21 @@ impl RemoteTransport for SshTransport {
             }
         })
     }
+
+    /// SSH exit code 255 indicates a connection-level error (broken pipe,
+    /// connection reset, host unreachable) — the ControlMaster's TCP
+    /// connection is dead. A signal kill also suggests the transport was
+    /// torn down. In either case, reconnecting through the same
+    /// ControlMaster is futile.
+    fn is_reconnectable(&self, exit_status: Option<&RemoteServerExitStatus>) -> bool {
+        match exit_status {
+            Some(s) => s.code != Some(255) && !s.signal_killed,
+            // No exit status available — optimistically allow reconnect.
+            None => true,
+        }
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use warpui::r#async::BoxFuture;
-    fn static_auth_context() -> Arc<RemoteServerAuthContext> {
-        Arc::new(RemoteServerAuthContext::new(
-            || -> BoxFuture<'static, Option<String>> { Box::pin(async { None }) },
-            || "user id/with spaces".to_string(),
-        ))
-    }
-
-    #[test]
-    fn remote_proxy_command_quotes_identity_key() {
-        let transport = SshTransport::new(
-            PathBuf::from("/tmp/control-master.sock"),
-            static_auth_context(),
-        );
-
-        let command = transport.remote_proxy_command();
-
-        assert!(command.contains("remote-server-proxy --identity-key"));
-        assert!(command.contains("'user id/with spaces'"));
-    }
-}
+#[path = "ssh_transport_tests.rs"]
+mod tests;

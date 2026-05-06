@@ -187,7 +187,6 @@ ai-ui-context-window-label = 上下文窗口
 ai-ui-context-window-desc = 基础模型的工作记忆 —— 一次能考虑多少 token 的对话、代码与文档。窗口越大，对话越长、跨更大代码库的回复越连贯，但代价是延迟与算力消耗更高。
 
 # 云端（ambient）智能体 UI
-ai-ui-ambient-failed = 失败
 ai-ui-ambient-start-cloud-agent = 启动新的 Oz 云智能体
 ai-ui-ambient-cloud-env-intro = 云智能体需要一个运行环境来完成任务。请先创建第一个环境。之后你可以编辑环境，或在需要时添加新环境。
 ai-ui-ambient-free-credits = 免费额度

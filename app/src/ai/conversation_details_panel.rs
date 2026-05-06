@@ -9,7 +9,6 @@ use pathfinder_color::ColorU;
 use warp_cli::agent::Harness;
 use warp_cli::skill::SkillSpec;
 use warp_core::channel::ChannelState;
-use warp_core::features::FeatureFlag;
 use warp_core::ui::color::coloru_with_opacity;
 use warp_i18n::t;
 use warpui::{
@@ -29,7 +28,6 @@ use warpui::{
 };
 
 use crate::ai::agent::api::ServerConversationToken;
-#[cfg(target_family = "wasm")]
 use crate::ai::agent::conversation::AIConversation;
 use crate::ai::agent::conversation::{AIConversationId, ConversationStatus};
 use crate::ai::agent_conversations_model::AgentRunDisplayStatus;
@@ -41,9 +39,9 @@ use crate::ai::ambient_agents::{cancel_task_with_toast, AmbientAgentTaskId};
 use crate::ai::artifacts::{Artifact, ArtifactButtonsRow, ArtifactButtonsRowEvent};
 use crate::ai::blocklist::BlocklistAIHistoryModel;
 use crate::ai::cloud_environments::{AmbientAgentEnvironment, CloudAmbientAgentEnvironment};
+use crate::ai::harness_availability::HarnessAvailabilityModel;
 use crate::ai::harness_display;
 use crate::appearance::Appearance;
-#[cfg(target_family = "wasm")]
 use crate::auth::UserUid;
 use crate::notebooks::NotebookId;
 use crate::send_telemetry_from_ctx;
@@ -65,7 +63,6 @@ use crate::view_components::copyable_text_field::{
 };
 use crate::view_components::DismissibleToast;
 use crate::workspace::{ForkedConversationDestination, ToastStack, WorkspaceAction};
-#[cfg(target_family = "wasm")]
 use crate::workspaces::user_profiles::UserProfiles;
 
 const FIELD_SPACING: f32 = 16.0;
@@ -162,7 +159,6 @@ impl CreatorInfo {
     }
 
     /// Create a CreatorInfo with just the first character as a fallback.
-    #[cfg(target_family = "wasm")]
     pub fn from_uid_fallback(uid: &str) -> Self {
         let first_char = uid.chars().next().unwrap_or('?').to_uppercase().to_string();
         Self::new(first_char, None)
@@ -225,7 +221,10 @@ impl ConversationDetailsData {
                     .and_then(|metadata| metadata.initial_working_directory.clone())
             })
     }
-    #[cfg(target_family = "wasm")]
+
+    /// Build details data from an in-memory `AIConversation`. Used both by the WASM
+    /// transcript/shared-session details panel and by the native pane-level details panel
+    /// when the active conversation is a local (non-cloud) Warp Agent run.
     pub fn from_conversation(conversation: &AIConversation, app: &AppContext) -> Self {
         let mut directory = None;
         let mut conversation_id = None;
@@ -560,6 +559,14 @@ impl ConversationDetailsPanel {
         self.set_action_buttons(&data, ctx);
         self.data = data;
         ctx.notify();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn task_display_status_for_test(&self) -> Option<AgentRunDisplayStatus> {
+        match &self.data.mode {
+            PanelMode::Task { display_status, .. } => display_status.clone(),
+            PanelMode::Conversation { .. } => None,
+        }
     }
 
     #[cfg(not(target_family = "wasm"))]
@@ -976,8 +983,13 @@ impl ConversationDetailsPanel {
         )
     }
 
-    fn render_harness_section(&self, appearance: &Appearance) -> Option<Box<dyn Element>> {
-        if !FeatureFlag::AgentHarness.is_enabled() {
+    fn render_harness_section(
+        &self,
+        appearance: &Appearance,
+        app: &AppContext,
+    ) -> Option<Box<dyn Element>> {
+        let availability = HarnessAvailabilityModel::as_ref(app);
+        if !availability.should_show_harness_selector() {
             return None;
         }
         let harness = self.data.harness?;
@@ -1006,7 +1018,7 @@ impl ConversationDetailsPanel {
         .finish();
 
         let name = Text::new(
-            harness_display::display_name(harness).to_string(),
+            availability.display_name_for(harness).to_string(),
             appearance.ui_font_family(),
             ui_font_size,
         )
@@ -1653,7 +1665,7 @@ impl View for ConversationDetailsPanel {
             );
         }
 
-        if let Some(harness_section) = self.render_harness_section(appearance) {
+        if let Some(harness_section) = self.render_harness_section(appearance, app) {
             content.add_child(
                 Container::new(harness_section)
                     .with_margin_bottom(FIELD_SPACING)

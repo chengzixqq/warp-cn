@@ -1,6 +1,11 @@
 <a href="https://www.warp.dev">
     <img width="1024" alt="Warp Agentic Development Environment product preview" src="https://github.com/user-attachments/assets/9976b2da-2edd-4604-a36c-8fd53719c6d4" />
 </a>
+<br />
+<p align="center">
+  <a href="https://www.warp.dev"><img height="20" alt="Built with Warp" src="./images/Built-With-Warp-Export@2x.png" /></a>
+  <a href="https://oz.warp.dev"><img height="20" alt="Powered by Oz" src="./images/Powered-By-Oz-Export@2x.png" /></a>
+</p>
 
 <p align="center">
   <a href="https://www.warp.dev">Website</a>
@@ -51,6 +56,8 @@ Warp's client codebase is open source and lives in this repository. We welcome c
 
 > [!TIP]
 > **Chat with contributors and the Warp team** in the [`#oss-contributors`](https://warpcommunity.slack.com/archives/C0B0LM8N4DB) Slack channel — a good place for ad-hoc questions, design discussion, and pairing with maintainers. New here? [Join the Warp Slack community](https://go.warp.dev/join-preview) first, then jump into `#oss-contributors`.
+
+Maintaining a popular open-source project? [Apply for Oz credits](https://tally.so/r/LZWxqG) to bring [agentic workflows](https://github.com/warpdotdev/oz-for-oss) like issue triage, PR review, and community management to your repo.
 
 ### Issue to PR
 

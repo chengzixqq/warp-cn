@@ -8,6 +8,8 @@ use std::time::Duration;
 use crate::auth::RemoteServerAuthContext;
 #[cfg(not(target_family = "wasm"))]
 use crate::client::ClientEvent;
+#[cfg(not(target_family = "wasm"))]
+use crate::client::InitializeParams;
 use crate::client::RemoteServerClient;
 use crate::setup::PreinstallCheckResult;
 #[cfg(not(target_family = "wasm"))]
@@ -469,7 +471,7 @@ impl RemoteServerManager {
     {
         #[cfg(target_family = "wasm")]
         {
-            log::warn!("check_binary is a no-op on WASM");
+            log::warn!("Remote server check_binary is a no-op on WASM");
         }
 
         #[cfg(not(target_family = "wasm"))]
@@ -482,20 +484,20 @@ impl RemoteServerManager {
             ctx.background_executor()
                 .spawn(async move {
                     // Run platform detection, binary check, and old-binary
-                    // check concurrently. The old-binary check lets the
-                    // controller distinguish fresh install (no prior
-                    // versioned binary) from update (prior versioned
-                    // binary present), so it can skip the install prompt
-                    // in the update case.
-                    let (platform_result, check_result, old_binary_result) = futures::join!(
-                        transport.detect_platform(),
-                        transport.check_binary(),
-                        transport.check_has_old_binary(),
-                    );
+                    // check sequentially so that each step reuses the
+                    // same SSH ControlMaster connection instead of
+                    // opening parallel channels. The old-binary check
+                    // lets the controller distinguish fresh install (no
+                    // prior versioned binary) from update (prior
+                    // versioned binary present), so it can skip the
+                    // install prompt in the update case.
+                    let platform_result = transport.detect_platform().await;
+                    let check_result = transport.check_binary().await;
+                    let old_binary_result = transport.check_has_old_binary().await;
                     let platform = match platform_result {
                         Ok(p) => Some(p),
                         Err(e) => {
-                            log::warn!("Platform detection failed for session {session_id:?}: {e}");
+                            log::warn!("Remote server platform detection failed: session={session_id:?} error={e}");
                             None
                         }
                     };
@@ -503,8 +505,7 @@ impl RemoteServerManager {
                         Ok(has) => has,
                         Err(e) => {
                             log::warn!(
-                                "Old-binary detection failed for session {session_id:?}: {e}. \
-                                 Treating as fresh install."
+                                "Remote server old-binary detection failed, treating as fresh install: session={session_id:?} error={e}"
                             );
                             false
                         }
@@ -520,7 +521,7 @@ impl RemoteServerManager {
                                 Ok(r) => Some(r),
                                 Err(e) => {
                                     log::warn!(
-                                        "Preinstall check failed for session {session_id:?}: {e}"
+                                        "Remote server preinstall check failed: session={session_id:?} error={e}"
                                     );
                                     None
                                 }
@@ -568,7 +569,7 @@ impl RemoteServerManager {
         _reason: UnsupportedReason,
         _ctx: &mut ModelContext<Self>,
     ) {
-        log::warn!("mark_setup_unsupported is a no-op on WASM");
+        log::warn!("Remote server mark_setup_unsupported is a no-op on WASM");
     }
 
     /// Marks a session as unsupported by the prebuilt remote-server
@@ -605,7 +606,7 @@ impl RemoteServerManager {
     {
         #[cfg(target_family = "wasm")]
         {
-            log::warn!("install_binary is a no-op on WASM");
+            log::warn!("Remote server install_binary is a no-op on WASM");
         }
 
         #[cfg(not(target_family = "wasm"))]
@@ -669,12 +670,12 @@ impl RemoteServerManager {
     {
         #[cfg(target_family = "wasm")]
         {
-            log::warn!("connect_session is a no-op on WASM");
+            log::warn!("Remote server connect_session is a no-op on WASM");
         }
 
         #[cfg(not(target_family = "wasm"))]
         {
-            log::info!("Starting remote server connection for session {session_id:?}");
+            log::info!("Starting remote server connection: session={session_id:?}");
 
             // Advance the user-visible setup pipeline.
             ctx.emit(RemoteServerManagerEvent::SetupStateChanged {
@@ -722,7 +723,9 @@ impl RemoteServerManager {
                                 .await;
                         }
                         Err(e) => {
-                            log::error!("Connection failed for session {session_id:?}: {e}");
+                            log::warn!(
+                                "Remote server connection failed: session={session_id:?} error={e}"
+                            );
                             let phase = e.phase();
                             let error = format!("{e}");
                             let _ = spawner
@@ -819,7 +822,14 @@ impl RemoteServerManager {
         // Phase 2: Initialize handshake.
         let auth_token = auth_context.get_auth_token().await;
         let resp = client
-            .initialize(auth_token.as_deref())
+            .initialize(
+                auth_token.as_deref(),
+                InitializeParams {
+                    user_id: auth_context.user_id().to_owned(),
+                    user_email: auth_context.user_email().to_owned(),
+                    crash_reporting_enabled: auth_context.crash_reporting_enabled(),
+                },
+            )
             .await
             .map_err(|e| ConnectAndHandshakeError::Initialize(anyhow::anyhow!("{e:#}")))?;
 
@@ -829,8 +839,8 @@ impl RemoteServerManager {
         let client_version = ChannelState::app_version();
         if !version_is_compatible(client_version, &resp.server_version) {
             log::warn!(
-                "Remote server version mismatch for session {session_id:?}: \
-                 client={client_version:?}, server={:?}. Removing stale binary.",
+                "Remote server version mismatch, removing stale binary: session={session_id:?} \
+                 client={client_version:?} server={:?}",
                 resp.server_version
             );
 
@@ -842,7 +852,9 @@ impl RemoteServerManager {
                 .await
                 .unwrap_or_else(|_| Err(anyhow::anyhow!("timed out after {REMOVAL_TIMEOUT:?}")))
             {
-                log::warn!("Failed to remove stale remote binary for session {session_id:?}: {e}");
+                log::warn!(
+                    "Remote server stale binary removal failed: session={session_id:?} error={e}"
+                );
             }
             return Err(ConnectAndHandshakeError::Initialize(anyhow::anyhow!(
                 "remote server version mismatch (client: {client_version:?}, \
@@ -955,6 +967,14 @@ impl RemoteServerManager {
         }
     }
 
+    /// Returns an iterator over all currently connected clients.
+    pub fn all_connected_clients(&self) -> impl Iterator<Item = &Arc<RemoteServerClient>> {
+        self.sessions.values().filter_map(|state| match state {
+            RemoteSessionState::Connected { client, .. } => Some(client),
+            _ => None,
+        })
+    }
+
     /// Rotates the daemon-wide auth credential on each connected remote host.
     ///
     /// Only sessions whose stored `identity_key` matches the current identity
@@ -967,7 +987,7 @@ impl RemoteServerManager {
     /// notification per connected host is sufficient.
     pub fn rotate_auth_token(&self, token: String) {
         let Some(ref auth_context) = self.auth_context else {
-            log::warn!("rotate_auth_token: no auth_context available, skipping");
+            log::warn!("Remote server rotate_auth_token: no auth_context available, skipping");
             return;
         };
         let current_identity_key = auth_context.remote_server_identity_key();
@@ -1051,11 +1071,13 @@ impl RemoteServerManager {
         }
 
         let Some(client) = self.client_for_session(session_id).cloned() else {
-            log::warn!("navigate_to_directory: no connected client for session {session_id:?}");
+            log::warn!(
+                "Remote server navigate_to_directory: no connected client session={session_id:?}"
+            );
             return;
         };
         let Some(host_id) = self.host_id_for_session(session_id).cloned() else {
-            log::warn!("navigate_to_directory: no host_id for session {session_id:?}");
+            log::warn!("Remote server navigate_to_directory: no host_id session={session_id:?}");
             return;
         };
 
@@ -1080,7 +1102,7 @@ impl RemoteServerManager {
                             .await;
                     }
                     Err(e) => {
-                        log::error!("navigate_to_directory failed for session {session_id:?}: {e}");
+                        log::warn!("Remote server navigate_to_directory failed: session={session_id:?} error={e}");
                         let error_kind = RemoteServerErrorKind::from_client_error(&e);
                         let _ = spawner
                             .spawn(move |_me, ctx| {
@@ -1137,15 +1159,11 @@ impl RemoteServerManager {
         ctx: &mut ModelContext<Self>,
     ) {
         let Some(client) = self.client_for_session(session_id).cloned() else {
-            log::warn!(
-                "load_remote_repo_metadata_directory: no connected client for session {session_id:?}"
-            );
+            log::warn!("Remote server load_remote_repo_metadata_directory: no connected client session={session_id:?}");
             return;
         };
         let Some(host_id) = self.host_id_for_session(session_id).cloned() else {
-            log::warn!(
-                "load_remote_repo_metadata_directory: no host_id for session {session_id:?}"
-            );
+            log::warn!("Remote server load_remote_repo_metadata_directory: no host_id session={session_id:?}");
             return;
         };
 
@@ -1173,8 +1191,8 @@ impl RemoteServerManager {
                         }
                     }
                     Err(e) => {
-                        log::error!(
-                            "load_repo_metadata_directory failed for session {session_id:?}: {e}"
+                        log::warn!(
+                            "Remote server load_repo_metadata_directory failed: session={session_id:?} error={e}"
                         );
                         let error_kind = RemoteServerErrorKind::from_client_error(&e);
                         let _ = spawner
@@ -1235,7 +1253,7 @@ impl RemoteServerManager {
         transport: Arc<dyn RemoteTransport>,
         ctx: &mut ModelContext<Self>,
     ) {
-        log::info!("Remote server connected for session {session_id:?}, host {host_id}");
+        log::info!("Remote server connected: session={session_id:?} host={host_id}");
 
         // Only transition if the session is still in Initializing state.
         let Some(RemoteSessionState::Initializing {
@@ -1282,7 +1300,7 @@ impl RemoteServerManager {
         // initial connect and every reconnect.
         if let Some(info) = self.session_bootstrap_info.get(&session_id) {
             if let Some(client) = self.client_for_session(session_id) {
-                log::info!("Sending SessionBootstrapped notification for session {session_id:?}");
+                log::info!("Remote server sending SessionBootstrapped notification: session={session_id:?}");
                 client.notify_session_bootstrapped(
                     session_id,
                     &info.shell_type,
@@ -1309,8 +1327,7 @@ impl RemoteServerManager {
                 #[cfg(not(unix))]
                 let signal_killed = false;
                 log::warn!(
-                    "Remote server process exited for session {session_id:?}: \
-                     code={code:?}, signal_killed={signal_killed}"
+                    "Remote server process exited: session={session_id:?} code={code:?} signal_killed={signal_killed}"
                 );
                 Some(RemoteServerExitStatus {
                     code,
@@ -1319,13 +1336,14 @@ impl RemoteServerManager {
             }
             Ok(None) => {
                 log::warn!(
-                    "Remote server process still running for session {session_id:?} \
-                     despite EOF on reader task"
+                    "Remote server process still running despite EOF on reader task: session={session_id:?}"
                 );
                 None
             }
             Err(e) => {
-                log::warn!("Failed to read exit status for session {session_id:?}: {e}");
+                log::warn!(
+                    "Remote server exit status read failed: session={session_id:?} error={e}"
+                );
                 None
             }
         }
@@ -1355,28 +1373,22 @@ impl RemoteServerManager {
             let exit_status = Self::capture_exit_status(&mut _child, session_id);
             // Drop the old child process explicitly before reconnecting.
             drop(_child);
+
+            // Ask the transport whether a reconnect is viable given the
+            // exit status. For example, SSH returns false when exit code
+            // 255 indicates the ControlMaster's TCP connection is dead.
+            if !transport.is_reconnectable(exit_status.as_ref()) {
+                log::warn!("Transport reports disconnect is not reconnectable, skipping reconnect: session={session_id:?} exit_status={exit_status:?}");
+                self.finalize_disconnect(session_id, host_id, exit_status, ctx);
+                return;
+            }
+
             let Some(auth_context) = self.auth_context.clone() else {
-                log::warn!(
-                    "Spontaneous disconnect for session {session_id:?}, \
-                     but no auth context is available for reconnect"
-                );
-                self.sessions
-                    .insert(session_id, RemoteSessionState::Disconnected);
-                self.remove_from_host_index(&host_id, session_id);
-                ctx.emit(RemoteServerManagerEvent::SessionDisconnected {
-                    session_id,
-                    host_id: host_id.clone(),
-                    exit_status,
-                });
-                if !self.host_to_sessions.contains_key(&host_id) {
-                    ctx.emit(RemoteServerManagerEvent::HostDisconnected { host_id });
-                }
+                log::warn!("Remote server spontaneous disconnect without auth context: session={session_id:?}");
+                self.finalize_disconnect(session_id, host_id, exit_status, ctx);
                 return;
             };
-            log::info!(
-                "Spontaneous disconnect for session {session_id:?}, \
-                 will attempt reconnect (transport={transport:?})"
-            );
+            log::info!("Remote server spontaneous disconnect, will attempt reconnect: session={session_id:?} host={host_id:?}");
 
             // Clear stale repo metadata and host index so downstream
             // models don't hold onto data from the dead server process.
@@ -1433,8 +1445,7 @@ impl RemoteServerManager {
         } = params;
 
         log::info!(
-            "Attempting reconnect for session {session_id:?} \
-             (attempt {attempt}/{MAX_RECONNECT_ATTEMPTS})"
+            "Attempting reconnect: session={session_id:?} attempt={attempt}/{MAX_RECONNECT_ATTEMPTS}"
         );
 
         self.sessions.insert(
@@ -1462,7 +1473,7 @@ impl RemoteServerManager {
                     .await
                     .unwrap_or(true);
                 if was_removed {
-                    log::info!("Session {session_id:?} removed during reconnect delay, aborting");
+                    log::info!("Remote server session removed during reconnect delay: session={session_id:?}");
                     return;
                 }
 
@@ -1482,8 +1493,7 @@ impl RemoteServerManager {
                                 // handshake, don't resurrect it.
                                 if !me.sessions.contains_key(&session_id) {
                                     log::info!(
-                                        "Session {session_id:?} deregistered during \
-                                         reconnect handshake, aborting"
+                                        "Remote server session deregistered during reconnect handshake, aborting: session={session_id:?}"
                                     );
                                     return;
                                 }
@@ -1506,9 +1516,8 @@ impl RemoteServerManager {
                             .await;
                     }
                     Err(e) => {
-                        log::error!(
-                            "Reconnect failed for session {session_id:?} \
-                             (attempt {attempt}): {e}"
+                        log::warn!(
+                            "Remote server reconnect failed: session={session_id:?} attempt={attempt} error={e}"
                         );
                         let _ = spawner
                             .spawn(move |me, ctx| {
@@ -1516,8 +1525,7 @@ impl RemoteServerManager {
                                 // handshake, don't retry or insert Disconnected.
                                 if !me.sessions.contains_key(&session_id) {
                                     log::info!(
-                                        "Session {session_id:?} deregistered during \
-                                         reconnect handshake, aborting"
+                                        "Remote server session deregistered during reconnect handshake, aborting: session={session_id:?}"
                                     );
                                     return;
                                 }
@@ -1561,7 +1569,7 @@ impl RemoteServerManager {
             );
         } else {
             log::warn!(
-                "Reconnect exhausted for session {session_id:?} after {} attempt(s)",
+                "Remote server reconnect exhausted: session={session_id:?} attempts={}",
                 params.attempt
             );
             self.sessions
@@ -1573,6 +1581,35 @@ impl RemoteServerManager {
             });
             // Note: HostDisconnected was already emitted by
             // mark_session_disconnected when entering the reconnect flow.
+        }
+    }
+
+    /// Marks a session as `Disconnected`, cleans up the host index, and
+    /// emits the appropriate disconnect events. Used by
+    /// `mark_session_disconnected` when reconnection is not possible
+    /// (SSH transport failure, missing auth context).
+    ///
+    /// Not used by `handle_reconnect_failure` because that path enters
+    /// from `attempt_reconnect`, which already cleared the host index
+    /// and emitted `HostDisconnected` when entering the reconnect flow.
+    #[cfg(not(target_family = "wasm"))]
+    fn finalize_disconnect(
+        &mut self,
+        session_id: SessionId,
+        host_id: HostId,
+        exit_status: Option<RemoteServerExitStatus>,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        self.sessions
+            .insert(session_id, RemoteSessionState::Disconnected);
+        self.remove_from_host_index(&host_id, session_id);
+        ctx.emit(RemoteServerManagerEvent::SessionDisconnected {
+            session_id,
+            host_id: host_id.clone(),
+            exit_status,
+        });
+        if !self.host_to_sessions.contains_key(&host_id) {
+            ctx.emit(RemoteServerManagerEvent::HostDisconnected { host_id });
         }
     }
 

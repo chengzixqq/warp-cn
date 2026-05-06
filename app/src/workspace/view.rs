@@ -30,6 +30,8 @@ use crate::workspace::cross_window_tab_drag::{
 pub(crate) use onboarding::OnboardingTutorial;
 
 use crate::ai::active_agent_views_model::ActiveAgentViewsModel;
+#[cfg(all(feature = "local_fs", not(target_family = "wasm")))]
+use crate::ai::agent::conversation::AIConversation;
 use crate::ai::agent_conversations_model::AgentConversationsModel;
 use crate::ai::agent_conversations_model::ConversationOrTask;
 use crate::ai::agent_management::notifications::toast_stack::AgentNotificationToastStack;
@@ -40,15 +42,26 @@ use crate::ai::agent_management::notifications::NotificationFilter;
 use crate::ai::agent_management::telemetry::AgentManagementTelemetryEvent;
 use crate::ai::agent_management::view::{AgentManagementView, AgentManagementViewEvent};
 use crate::ai::agent_management::AgentManagementEvent;
+#[cfg(all(feature = "local_fs", not(target_family = "wasm")))]
+use crate::ai::agent_sdk::driver::upload_snapshot_for_handoff;
 use crate::ai::ambient_agents::telemetry::{CloudAgentTelemetryEvent, CloudModeEntryPoint};
 use crate::ai::ambient_agents::AmbientAgentTaskId;
 use crate::ai::blocklist::agent_view::agent_input_footer::editor::AgentToolbarEditorMode;
+#[cfg(all(feature = "local_fs", not(target_family = "wasm")))]
+use crate::ai::blocklist::agent_view::agent_input_footer::sort_environments_by_recency;
 use crate::ai::blocklist::agent_view::AgentViewEntryOrigin;
-use crate::ai::blocklist::history_model::load_conversation_from_server;
+#[cfg(all(feature = "local_fs", not(target_family = "wasm")))]
+use crate::ai::blocklist::handoff::touched_repos::{
+    derive_touched_workspace, extract_paths_from_conversation, pick_handoff_overlap_env,
+};
+use crate::ai::blocklist::history_model::{load_conversation_from_server, CloudConversationData};
 use crate::ai::blocklist::suggested_agent_mode_workflow_modal::SuggestedAgentModeWorkflowAndId;
 use crate::ai::blocklist::suggested_rule_modal::{
     SuggestedRuleAndId, SuggestedRuleModal, SuggestedRuleModalEvent,
 };
+use crate::ai::blocklist::FORK_PREFIX;
+#[cfg(all(feature = "local_fs", not(target_family = "wasm")))]
+use crate::ai::cloud_environments::CloudAmbientAgentEnvironment;
 use crate::ai::conversation_utils;
 use crate::ai::document::ai_document_model::{AIDocumentId, AIDocumentModel};
 use crate::ai::llms::LLMPreferences;
@@ -113,8 +126,6 @@ use crate::util::openable_file_type::FileTarget;
 #[cfg(feature = "local_fs")]
 use crate::util::openable_file_type::{resolve_file_target_with_editor_choice, EditorLayout};
 
-use crate::ai::blocklist::history_model::CloudConversationData;
-use crate::ai::blocklist::FORK_PREFIX;
 #[cfg(not(target_family = "wasm"))]
 use crate::terminal::cli_agent_sessions::plugin_manager::{plugin_manager_for, PluginModalKind};
 use crate::terminal::cli_agent_sessions::{CLIAgentSessionsModel, CLIAgentSessionsModelEvent};
@@ -313,6 +324,10 @@ use crate::terminal::session_settings::{
 };
 use crate::terminal::settings::{SpacingMode, TerminalSettings};
 use crate::terminal::shell::ShellType;
+#[cfg(all(feature = "local_fs", not(target_family = "wasm")))]
+use crate::terminal::view::ambient_agent::{
+    HandoffSubmissionState, PendingHandoff, SnapshotUploadStatus,
+};
 #[cfg(feature = "local_tty")]
 use crate::terminal::view::docker_sandbox::DEFAULT_DOCKER_SANDBOX_BASE_IMAGE;
 use crate::terminal::{self, SizeInfo, TerminalView};
@@ -2958,7 +2973,7 @@ impl Workspace {
                 // Update transcript details if task or conversation data is updated
                 AgentConversationsModelEvent::NewTasksReceived
                 | AgentConversationsModelEvent::TasksUpdated
-                | AgentConversationsModelEvent::ConversationUpdated
+                | AgentConversationsModelEvent::ConversationUpdated { .. }
                 | AgentConversationsModelEvent::ConversationArtifactsUpdated { .. } => {
                     me.update_transcript_details_panel_data(ctx);
                 }
@@ -5649,18 +5664,27 @@ impl Workspace {
             #[allow(unused_variables)]
             AIFactViewEvent::OpenFile(path) => {
                 #[cfg(feature = "local_fs")]
-                self.open_code(
-                    CodeSource::Link {
-                        path: path.clone(),
-                        range_start: None,
-                        range_end: None,
-                    },
-                    *EditorSettings::as_ref(ctx).open_file_layout.value(),
-                    None,  // no line/column specified
-                    false, // preview
-                    &[],
-                    ctx,
-                );
+                {
+                    let settings = EditorSettings::as_ref(ctx);
+                    let target = resolve_file_target_with_editor_choice(
+                        path,
+                        *settings.open_file_editor,
+                        *settings.prefer_markdown_viewer,
+                        *settings.open_file_layout,
+                        None,
+                    );
+                    self.open_file_with_target(
+                        path.clone(),
+                        target,
+                        None,
+                        CodeSource::Link {
+                            path: path.clone(),
+                            range_start: None,
+                            range_end: None,
+                        },
+                        ctx,
+                    );
+                }
             }
             AIFactViewEvent::InitializeProject(path) => {
                 let active_terminal_view = self
@@ -8023,10 +8047,6 @@ impl Workspace {
         context: Option<&CodeReviewPaneContext>,
         ctx: &mut ViewContext<Self>,
     ) {
-        if !*TabSettings::as_ref(ctx).show_code_review_button {
-            return;
-        }
-
         // If context is provided, use it directly. Otherwise, derive from active pane group.
         let context_data: Option<(
             Option<PathBuf>,
@@ -11636,7 +11656,12 @@ impl Workspace {
                         ctx,
                     )
                 } else {
-                    history_model.fork_conversation(&source_conversation, FORK_PREFIX, ctx)
+                    history_model.fork_conversation(
+                        &source_conversation,
+                        FORK_PREFIX,
+                        false, /* preserve_task_ids */
+                        ctx,
+                    )
                 }
             });
 
@@ -12924,6 +12949,284 @@ impl Workspace {
         });
     }
 
+    /// Open a local-to-cloud handoff pane in place over the active local pane.
+    /// Triggered by the `/move-to-cloud` slash command and the "Hand off to
+    /// cloud" footer chip.
+    ///
+    /// When the active conversation is non-empty and has a server token, mints a
+    /// server-side fork via `POST /agent/conversations/{conversation_id}/fork`,
+    /// then pushes a fresh cloud-mode view onto the active pane's navigation stack
+    /// and pre-populates it with the forked conversation. Pressing Escape in the
+    /// cloud-mode view pops back to the original local pane (the same pattern used
+    /// by Cmd-Alt-Enter / Ctrl-Alt-Enter to enter cloud mode from a local session).
+    ///
+    /// All failure modes — ineligibility, fork RPC failure, and local fork
+    /// materialization failure — surface an error toast and **do not open** any
+    /// pane. The local conversation is unaffected.
+    #[cfg(all(feature = "local_fs", not(target_family = "wasm")))]
+    fn start_local_to_cloud_handoff(
+        &mut self,
+        initial_prompt: Option<String>,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        if !FeatureFlag::OzHandoff.is_enabled() || !FeatureFlag::HandoffLocalCloud.is_enabled() {
+            return;
+        }
+
+        let source = self
+            .active_tab_pane_group()
+            .as_ref(ctx)
+            .active_session_view(ctx)
+            .and_then(|view| {
+                let terminal_view_id = view.id();
+                let history = BlocklistAIHistoryModel::handle(ctx);
+                history
+                    .as_ref(ctx)
+                    .active_conversation(terminal_view_id)
+                    .filter(|c| !c.is_empty())
+                    .and_then(|conversation| {
+                        conversation
+                            .server_conversation_token()
+                            .cloned()
+                            .map(|token| (view.clone(), conversation.clone(), token))
+                    })
+            });
+
+        let Some((source_view, source_conversation, source_token)) = source else {
+            // Ineligible: don't open a fresh unrelated pane — the chip is a
+            // hand-off-this-conversation action.
+            let window_id = ctx.window_id();
+            WorkspaceToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
+                let toast = DismissibleToast::error(
+                    "Failed to prepare handoff. Please try again.".to_owned(),
+                );
+                toast_stack.add_ephemeral_toast(toast, window_id, ctx);
+            });
+            return;
+        };
+
+        let ai_client = ServerApiProvider::as_ref(ctx).get_ai_client();
+        let source_conversation_id = source_token.as_str().to_string();
+        ctx.spawn(
+            async move { ai_client.fork_conversation(source_conversation_id).await },
+            move |me, result, ctx| match result {
+                Ok(response) => {
+                    me.complete_local_to_cloud_handoff_open(
+                        source_view,
+                        source_conversation,
+                        response.forked_conversation_id,
+                        initial_prompt,
+                        ctx,
+                    );
+                }
+                Err(err) => {
+                    log::warn!("fork_conversation failed: {err:#}");
+                    let window_id = ctx.window_id();
+                    WorkspaceToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
+                        let toast = DismissibleToast::error(
+                            "Failed to prepare handoff. Please try again.".to_owned(),
+                        );
+                        toast_stack.add_ephemeral_toast(toast, window_id, ctx);
+                    });
+                }
+            },
+        );
+    }
+
+    /// Finishes the local-to-cloud handoff open after the fork RPC returns.
+    /// Materializes a local fork bound to the server's forked conversation id,
+    /// pushes a fresh cloud-mode view onto `source_view`'s navigation stack,
+    /// restores the forked conversation into it, exits the source pane's agent
+    /// view (so Esc returns to a clean terminal), seeds `PendingHandoff`, and
+    /// kicks off async derivation + snapshot upload.
+    ///
+    /// The source's agent-view exit happens AFTER the new pane is pushed, so the
+    /// source pane is hidden behind the cloud-mode view when its chrome flips
+    /// from agent mode to terminal mode — the user never sees the transition.
+    /// The pane-stack pop logic in `terminal/view.rs` skips popping when the
+    /// `ExitedAgentView` event has `is_exit_before_new_entrance: true`, which
+    /// prevents the bookkeeping exit triggered by `restore_conversation_after_view_creation`
+    /// (re-entering agent view for the forked conversation) from tearing down
+    /// the just-pushed pane.
+    #[cfg(all(feature = "local_fs", not(target_family = "wasm")))]
+    fn complete_local_to_cloud_handoff_open(
+        &mut self,
+        source_view: ViewHandle<TerminalView>,
+        source_conversation: AIConversation,
+        forked_conversation_id: String,
+        initial_prompt: Option<String>,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        // Materialize the local fork up-front so the new pane has something to restore.
+        // Preserve source task ids so the local fork's task store matches the cloud-side
+        // fork (the cloud agent's ClientActions reference these task ids).
+        let history_model = BlocklistAIHistoryModel::handle(ctx);
+        let local_fork = match history_model.update(ctx, |history_model, ctx| {
+            history_model.fork_conversation(
+                &source_conversation,
+                FORK_PREFIX,
+                true, /* preserve_task_ids */
+                ctx,
+            )
+        }) {
+            Ok(forked) => forked,
+            Err(err) => {
+                log::warn!("Failed to materialize local fork for handoff: {err:#}");
+                let window_id = ctx.window_id();
+                WorkspaceToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
+                    let toast = DismissibleToast::error(
+                        "Failed to prepare handoff. Please try again.".to_owned(),
+                    );
+                    toast_stack.add_ephemeral_toast(toast, window_id, ctx);
+                });
+                return;
+            }
+        };
+        let local_fork_id = local_fork.id();
+
+        // Push the cloud-mode pane onto the source's nav stack.
+        let Some((new_pane_view, model_handle)) = source_view.update(ctx, |view, view_ctx| {
+            view.start_local_to_cloud_handoff_pane(view_ctx)
+        }) else {
+            log::warn!("start_local_to_cloud_handoff: failed to push cloud-mode pane");
+            let window_id = ctx.window_id();
+            WorkspaceToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
+                let toast = DismissibleToast::error(
+                    "Failed to prepare handoff. Please try again.".to_owned(),
+                );
+                toast_stack.add_ephemeral_toast(toast, window_id, ctx);
+            });
+            return;
+        };
+
+        if let Some(prompt) = initial_prompt.as_deref().filter(|p| !p.is_empty()) {
+            new_pane_view.update(ctx, |terminal_view, view_ctx| {
+                terminal_view.input().update(view_ctx, |input, input_ctx| {
+                    input.replace_buffer_content(prompt, input_ctx);
+                });
+            });
+        }
+
+        // Restore the forked conversation into the new pane so its AI exchanges are
+        // visible immediately. This re-enters agent view for the forked conversation,
+        // which emits an internal `ExitedAgentView { is_exit_before_new_entrance: true }`
+        // for the cloud-mode placeholder; the pane-stack pop is skipped for that flag.
+        new_pane_view.update(ctx, |terminal_view, view_ctx| {
+            terminal_view.restore_conversation_after_view_creation(
+                RestoredAIConversation::new(local_fork.clone()),
+                /* use_live_appearance */ true,
+                view_ctx,
+            );
+        });
+
+        // Enter fullscreen agent view for the restored fork in the new pane. Without this the
+        // pane sits in shared-session-viewer-pending mode and the input renders read-only;
+        // entering agent view activates the editable cloud-mode input flow. Use
+        // `RestoreExistingConversation` to indicate the conversation is restored (not new) —
+        // the `is_local_to_cloud_handoff` flag set via `set_pending_handoff` below is the
+        // authoritative "this is a cloud agent pane" signal for downstream gating
+        // (`is_cloud_agent_pre_first_exchange`, etc.).
+        new_pane_view.update(ctx, |terminal_view, view_ctx| {
+            terminal_view.enter_agent_view_for_conversation(
+                None,
+                AgentViewEntryOrigin::RestoreExistingConversation,
+                local_fork_id,
+                view_ctx,
+            );
+        });
+
+        // Bind the local fork to the cloud-side conversation id and mark it as a shared conversation.
+        history_model.update(ctx, |history_model, _| {
+            history_model.set_server_conversation_token_for_conversation(
+                local_fork_id,
+                forked_conversation_id.clone(),
+            );
+            history_model.set_viewing_shared_session_for_conversation(local_fork_id, true);
+        });
+
+        // Exit the source pane's fullscreen agent view (if active) so pressing Esc in the
+        // cloud-mode pane returns to a terminal-mode source. This runs AFTER the push, so
+        // the source pane is hidden behind the cloud-mode view and the transition is
+        // invisible to the user. `was_ambient_agent` is false for a local source, so this
+        // exit doesn't pop the pane stack.
+        let source_agent_view_controller = source_view.as_ref(ctx).agent_view_controller().clone();
+        if source_agent_view_controller
+            .as_ref(ctx)
+            .agent_view_state()
+            .is_fullscreen()
+        {
+            source_agent_view_controller.update(ctx, |controller, ctx| {
+                controller.exit_agent_view_without_confirmation(ctx);
+            });
+        }
+
+        let pending = PendingHandoff {
+            forked_conversation_id: forked_conversation_id.clone(),
+            touched_workspace: None,
+            snapshot_upload: SnapshotUploadStatus::Pending,
+            submission_state: HandoffSubmissionState::Idle,
+        };
+        model_handle.update(ctx, |model, model_ctx| {
+            model.set_pending_handoff(Some(pending), model_ctx);
+        });
+
+        // Async background prep: derive the touched workspace, then upload the
+        // snapshot. The pane is fully interactive throughout. `submit_handoff`
+        // gates on both completing before allowing a spawn.
+        let async_model_handle = model_handle.clone();
+        let server_api_provider = ServerApiProvider::as_ref(ctx);
+        let ai_client = server_api_provider.get_ai_client();
+        let http = server_api_provider.get_http_client();
+        ctx.spawn(
+            async move {
+                let paths = extract_paths_from_conversation(&source_conversation);
+                let workspace = derive_touched_workspace(paths).await;
+                let repo_paths: Vec<_> =
+                    workspace.repos.iter().map(|r| r.git_root.clone()).collect();
+                let upload_result = upload_snapshot_for_handoff(
+                    repo_paths,
+                    workspace.orphan_files.clone(),
+                    ai_client,
+                    http.as_ref(),
+                )
+                .await;
+                (workspace, upload_result)
+            },
+            move |_workspace, (derived_workspace, upload_result), ctx| {
+                async_model_handle.update(ctx, |model, model_ctx| {
+                    if !model.is_local_to_cloud_handoff() {
+                        return;
+                    }
+                    let mut envs = CloudAmbientAgentEnvironment::get_all(model_ctx);
+                    sort_environments_by_recency(&mut envs);
+                    if let Some(overlap_env) = pick_handoff_overlap_env(&derived_workspace, envs) {
+                        model.set_environment_id(Some(overlap_env), model_ctx);
+                    }
+                    model.set_pending_handoff_workspace(derived_workspace, model_ctx);
+                    match upload_result {
+                        Ok(Some(initial_snapshot_token)) => {
+                            model.set_pending_handoff_snapshot_upload(
+                                SnapshotUploadStatus::Uploaded(initial_snapshot_token),
+                                model_ctx,
+                            );
+                        }
+                        Ok(None) => {
+                            model.set_pending_handoff_snapshot_upload(
+                                SnapshotUploadStatus::SkippedEmptyWorkspace,
+                                model_ctx,
+                            );
+                        }
+                        Err(err) => {
+                            log::warn!("Handoff snapshot upload failed: {err:#}");
+                            model
+                                .record_handoff_snapshot_upload_failed(format!("{err}"), model_ctx);
+                        }
+                    }
+                });
+            },
+        );
+    }
+
     pub(crate) fn handle_file_tree_event(
         &mut self,
         pane_group: ViewHandle<PaneGroup>,
@@ -13486,6 +13789,42 @@ impl Workspace {
             }
             #[cfg(not(feature = "local_fs"))]
             pane_group::Event::RemoteRepoNavigated { .. } => {}
+            pane_group::Event::OpenChildAgentInNewTab { conversation_id } => {
+                // "Open in new tab" from the orchestration pill bar's 3-dot
+                // menu. Spawn a fresh session tab and enter agent view for
+                // the child conversation. The conversation already lives in
+                // `BlocklistAIHistoryModel`, so the new terminal view can
+                // adopt it without any restoration plumbing — just call
+                // `enter_agent_view_for_conversation` on it.
+                let conversation_id = *conversation_id;
+                let window_id = ctx.window_id();
+                self.add_new_session_tab_with_default_mode(
+                    NewSessionSource::Tab,
+                    Some(window_id),
+                    None, /* chosen_shell */
+                    None, /* conversation_restoration */
+                    true, /* hide_homepage */
+                    ctx,
+                );
+                if let Some(terminal_view) = self
+                    .active_tab_pane_group()
+                    .as_ref(ctx)
+                    .active_session_view(ctx)
+                {
+                    terminal_view.update(ctx, |view, ctx| {
+                        view.enter_agent_view_for_conversation(
+                            None,
+                            AgentViewEntryOrigin::OrchestrationPillBar,
+                            conversation_id,
+                            ctx,
+                        );
+                    });
+                } else {
+                    log::warn!(
+                        "OpenChildAgentInNewTab: no active terminal view in newly created tab"
+                    );
+                }
+            }
             pane_group::Event::DroppedOnTabBar { origin, pane_id } => {
                 if let Some(hovered_tab_index) = self.hovered_tab_index {
                     match hovered_tab_index {
@@ -18357,6 +18696,18 @@ impl Workspace {
                     self.render_config_panel_maximized(pane_group, &config, app),
                     app,
                 );
+            } else if !config.contains_item(&HeaderToolbarItemKind::CodeReview) {
+                Self::add_panel_with_separator(
+                    &mut main_content,
+                    &mut prev_panel_added,
+                    self.render_config_panel(
+                        &HeaderToolbarItemKind::CodeReview,
+                        pane_group,
+                        &config,
+                        app,
+                    ),
+                    app,
+                );
             }
         } else if !is_right_maximized {
             main_content = main_content.with_child(Shrinkable::new(1.0, terminal_content).finish());
@@ -18987,6 +19338,18 @@ impl Workspace {
                     self.render_config_panel_maximized(pane_group, &config, app),
                     app,
                 );
+            } else if !config.contains_item(&HeaderToolbarItemKind::CodeReview) {
+                Self::add_panel_with_separator(
+                    &mut panels_view,
+                    &mut prev_panel_added,
+                    self.render_config_panel(
+                        &HeaderToolbarItemKind::CodeReview,
+                        pane_group,
+                        &config,
+                        app,
+                    ),
+                    app,
+                );
             }
         }
 
@@ -19046,7 +19409,7 @@ impl Workspace {
     }
 
     /// Renders a configurable panel for the given toolbar item, if it is open.
-    /// Returns `None` if the panel should not be rendered (item not available,
+    /// Returns `None` if the panel should not be rendered (item not supported,
     /// panel not open, or item is not a panel type).
     fn render_config_panel(
         &self,
@@ -19055,7 +19418,7 @@ impl Workspace {
         config: &HeaderToolbarChipSelection,
         app: &AppContext,
     ) -> Option<Box<dyn Element>> {
-        if !item.is_available(app) || !item.is_panel() {
+        if !item.is_supported(app) || !item.is_panel() {
             return None;
         }
         match item {
@@ -19101,7 +19464,7 @@ impl Workspace {
         if !pane_group.right_panel_open || !pane_group.is_right_panel_maximized {
             return None;
         }
-        if !HeaderToolbarItemKind::CodeReview.is_available(app) {
+        if !HeaderToolbarItemKind::CodeReview.is_supported(app) {
             return None;
         }
         Some(Shrinkable::new(1.0, ChildView::new(&self.right_panel_view).finish()).finish())
@@ -20053,6 +20416,12 @@ impl TypedActionView for Workspace {
             OpenSettingsFile => {
                 let path = crate::settings::user_preferences_toml_file_path();
                 self.add_tab_for_code_file(path, None, ctx);
+            }
+            OpenLocalToCloudHandoffPane { initial_prompt } => {
+                #[cfg(all(feature = "local_fs", not(target_family = "wasm")))]
+                self.start_local_to_cloud_handoff(initial_prompt.clone(), ctx);
+                #[cfg(not(all(feature = "local_fs", not(target_family = "wasm"))))]
+                let _ = initial_prompt;
             }
             OpenNetworkLogPane => {
                 self.open_network_log_pane(ctx);
@@ -22333,15 +22702,27 @@ impl View for Workspace {
                 && self.vertical_tabs_panel_open;
 
             if is_vertical {
-                // Anchor the menu below the vertical-tabs + button.
+                // Anchor the menu below the vertical-tabs + button. The anchor
+                // side mirrors which side the tabs panel itself is on, so the
+                // menu always expands inward and stays inside the window.
+                let tabs_side =
+                    Self::tabs_panel_side(&TabSettings::as_ref(app).header_toolbar_chip_selection);
+                let (anchor, child_anchor) = match tabs_side {
+                    PanelPosition::Left => {
+                        (PositionedElementAnchor::BottomLeft, ChildAnchor::TopLeft)
+                    }
+                    PanelPosition::Right => {
+                        (PositionedElementAnchor::BottomRight, ChildAnchor::TopRight)
+                    }
+                };
                 stack.add_positioned_overlay_child(
                     ChildView::new(&self.new_session_dropdown_menu).finish(),
                     OffsetPositioning::offset_from_save_position_element(
                         vertical_tabs::VERTICAL_TABS_ADD_TAB_POSITION_ID,
                         vec2f(0., 4.),
                         PositionedElementOffsetBounds::WindowBySize,
-                        PositionedElementAnchor::BottomLeft,
-                        ChildAnchor::TopLeft,
+                        anchor,
+                        child_anchor,
                     ),
                 );
             } else {
