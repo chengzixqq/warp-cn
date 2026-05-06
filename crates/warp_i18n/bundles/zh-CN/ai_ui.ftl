@@ -274,3 +274,7 @@ ai-ui-notifications-filter-unread = 未读
 ai-ui-notifications-filter-errors = 错误
 ai-ui-notifications-filter-with-count = { $label }（{ $count }）
 ai-ui-notifications-empty = 暂无通知
+
+# 编排控件
+ai-ui-orchestration-agent-location = 智能体位置
+ai-ui-orchestration-view-details = 查看详情

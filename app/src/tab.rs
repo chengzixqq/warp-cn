@@ -194,7 +194,7 @@ impl TabData {
 
         for section_items in [
             self.session_sharing_menu_items(index, ctx),
-            self.copy_metadata_menu_items(pane_name_target, ctx),
+            self.copy_metadata_menu_items(pane_name_target.clone(), ctx),
             self.modify_tab_menu_items(index, tabs_len, pane_name_target, ctx),
             self.close_tab_menu_items(index, tabs_len, ctx),
             Self::save_config_menu_items(index),

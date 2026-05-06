@@ -274,3 +274,7 @@ ai-ui-notifications-filter-unread = Unread
 ai-ui-notifications-filter-errors = Errors
 ai-ui-notifications-filter-with-count = { $label } ({ $count })
 ai-ui-notifications-empty = No notifications
+
+# Orchestration controls
+ai-ui-orchestration-agent-location = Agent location
+ai-ui-orchestration-view-details = View details
