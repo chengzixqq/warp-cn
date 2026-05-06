@@ -190,6 +190,11 @@ pub struct WorkspaceMetadata {
     pub navigated_ts: Option<NaiveDateTime>,
     pub modified_ts: Option<NaiveDateTime>,
     pub queried_ts: Option<NaiveDateTime>,
+    pub synced_at: Option<NaiveDateTime>,
+    pub index_bytes: Option<i64>,
+    pub file_count: Option<i32>,
+    pub fragment_count: Option<i32>,
+    pub query_count: i32,
 }
 
 #[derive(Clone, Insertable, AsChangeset)]
@@ -199,6 +204,11 @@ pub struct NewWorkspaceMetadata {
     pub navigated_ts: Option<NaiveDateTime>,
     pub modified_ts: Option<NaiveDateTime>,
     pub queried_ts: Option<NaiveDateTime>,
+    pub synced_at: Option<NaiveDateTime>,
+    pub index_bytes: Option<i64>,
+    pub file_count: Option<i32>,
+    pub fragment_count: Option<i32>,
+    pub query_count: i32,
 }
 
 #[derive(Clone, Identifiable, Insertable, Queryable, AsChangeset)]

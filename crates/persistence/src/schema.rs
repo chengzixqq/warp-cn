@@ -481,6 +481,11 @@ diesel::table! {
         navigated_ts -> Nullable<Timestamp>,
         modified_ts -> Nullable<Timestamp>,
         queried_ts -> Nullable<Timestamp>,
+        synced_at -> Nullable<Timestamp>,
+        index_bytes -> Nullable<BigInt>,
+        file_count -> Nullable<Integer>,
+        fragment_count -> Nullable<Integer>,
+        query_count -> Integer,
     }
 }
 
