@@ -531,9 +531,9 @@ async fn check_for_update(force: bool) -> Result<CheckResult> {
                     }
                     return Ok(result);
                 }
-                Err(err) => bail!(
-                    "GitHub /releases/latest rate-limited and tags fallback failed: {err:#}"
-                ),
+                Err(err) => {
+                    bail!("GitHub /releases/latest rate-limited and tags fallback failed: {err:#}")
+                }
             }
         }
         // Non-rate-limit 403 (auth failure, repo private, etc.) falls through
@@ -755,7 +755,9 @@ pub(crate) fn write_json_atomically(path: &Path, bytes: &[u8]) -> Result<()> {
         .tempfile_in(parent)
         .context("create temp cache file")?;
     tmp.write_all(bytes).context("write temp cache file")?;
-    tmp.as_file_mut().sync_all().context("sync temp cache file")?;
+    tmp.as_file_mut()
+        .sync_all()
+        .context("sync temp cache file")?;
     tmp.persist(path)
         .map_err(|err| err.error)
         .with_context(|| format!("replace cache file {}", path.display()))?;

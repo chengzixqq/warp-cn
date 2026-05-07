@@ -1245,9 +1245,9 @@ impl CodePageWidget {
         let is_auggie_unavailable =
             crate::ai::codebase_index_backend::is_auggie_backend_unavailable(app);
 
-        let switch = ui_builder
-            .switch(self.switch_state.clone())
-            .check(crate::ai::codebase_index_backend::is_codebase_context_enabled_for_indexing(app));
+        let switch = ui_builder.switch(self.switch_state.clone()).check(
+            crate::ai::codebase_index_backend::is_codebase_context_enabled_for_indexing(app),
+        );
 
         let disabled_tooltip_text = codebase_indexing_disabled_tooltip(
             admin_setting,
@@ -2798,8 +2798,14 @@ mod tests {
         let err = CodebaseIndexFinishedStatus::Failed(CodebaseIndexingError::ExceededMaxFileLimit);
         let line = build_index_stats_line(&ws, Some(&err)).expect("error line");
         // Must NOT include the stats fields when failed.
-        assert!(!line.contains("123"), "stats leaked into error line: {line}");
-        assert!(!line.contains(" · "), "separator leaked into error line: {line}");
+        assert!(
+            !line.contains("123"),
+            "stats leaked into error line: {line}"
+        );
+        assert!(
+            !line.contains(" · "),
+            "separator leaked into error line: {line}"
+        );
     }
 
     #[test]
@@ -2814,8 +2820,10 @@ mod tests {
                 .is_empty()
         );
         assert!(
-            !error_reason_text(&CodebaseIndexingError::FailedToSyncIntermediateNodes(vec![]))
-                .is_empty()
+            !error_reason_text(&CodebaseIndexingError::FailedToSyncIntermediateNodes(
+                vec![]
+            ))
+            .is_empty()
         );
         let other_msg =
             error_reason_text(&CodebaseIndexingError::Other(anyhow::anyhow!("disk full")));

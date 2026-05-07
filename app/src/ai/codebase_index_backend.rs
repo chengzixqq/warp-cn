@@ -30,8 +30,10 @@ pub(crate) fn codebase_index_backend(ctx: &AppContext) -> Option<CodebaseIndexBa
     let auth = AuthStateProvider::as_ref(ctx).get();
     if auth.is_logged_in() && FeatureFlag::FullSourceCodeEmbedding.is_enabled() {
         Some(CodebaseIndexBackend::WarpCloud)
-    } else if cfg!(all(not(target_family = "wasm"), feature = "auggie_codebase_index"))
-        && FeatureFlag::AuggieCodebaseIndex.is_enabled()
+    } else if cfg!(all(
+        not(target_family = "wasm"),
+        feature = "auggie_codebase_index"
+    )) && FeatureFlag::AuggieCodebaseIndex.is_enabled()
     {
         Some(CodebaseIndexBackend::Auggie)
     } else {

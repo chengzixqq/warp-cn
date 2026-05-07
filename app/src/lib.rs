@@ -200,11 +200,11 @@ use workflows::manager::WorkflowManager;
 use crate::ai::ambient_agents::github_auth_notifier::GitHubAuthNotifier;
 #[cfg(all(not(target_family = "wasm"), feature = "auggie_codebase_index"))]
 use crate::ai::auggie_mcp::AuggieMcpClientModel;
+#[cfg(all(not(target_family = "wasm"), feature = "auggie_codebase_index"))]
+use crate::ai::codebase_index_backend::is_local_codebase_index_backend;
 use crate::ai::codebase_index_backend::{
     codebase_context_limits_for_backend, is_codebase_context_enabled_for_indexing,
 };
-#[cfg(all(not(target_family = "wasm"), feature = "auggie_codebase_index"))]
-use crate::ai::codebase_index_backend::is_local_codebase_index_backend;
 use crate::ai::document::ai_document_model::AIDocumentModel;
 use crate::ai::facts::manager::AIFactManager;
 use crate::ai::harness_availability::HarnessAvailabilityModel;
@@ -1886,13 +1886,12 @@ pub(crate) fn initialize_app(
     }
 
     ctx.add_singleton_model(|ctx| {
-        let indices_to_restore = if is_codebase_context_enabled_for_indexing(ctx)
-            && launch_mode.supports_indexing()
-        {
-            persisted_workspaces.clone()
-        } else {
-            vec![]
-        };
+        let indices_to_restore =
+            if is_codebase_context_enabled_for_indexing(ctx) && launch_mode.supports_indexing() {
+                persisted_workspaces.clone()
+            } else {
+                vec![]
+            };
 
         let codebase_limits = codebase_context_limits_for_backend(ctx);
 

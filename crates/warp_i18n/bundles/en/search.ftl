@@ -18,6 +18,7 @@ search-filter-placeholder-plans = Search plans
 search-filter-placeholder-natural-language = e.g. replace string in file
 search-filter-placeholder-actions = Search actions
 search-filter-placeholder-sessions = Search sessions
+search-filter-placeholder-tabs = Search tabs
 search-filter-placeholder-conversations = Search conversations
 search-filter-placeholder-historical-conversations = Search historical conversations
 search-filter-placeholder-launch-configurations = Search launch configurations

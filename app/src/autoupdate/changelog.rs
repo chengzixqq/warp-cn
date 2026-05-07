@@ -141,7 +141,10 @@ async fn fetch_changelog_from_github_releases() -> Result<Option<Changelog>> {
         }]
     };
 
-    log::info!("warp-cn: loaded changelog from GitHub release {}", notes.tag);
+    log::info!(
+        "warp-cn: loaded changelog from GitHub release {}",
+        notes.tag
+    );
 
     Ok(Some(Changelog {
         date,

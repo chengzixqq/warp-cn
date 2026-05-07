@@ -164,9 +164,7 @@ pub(crate) struct AuggieMcpService {
 }
 
 impl AuggieMcpService {
-    async fn spawn_with_flag(
-        last_spawn_failed: Arc<AtomicBool>,
-    ) -> Result<Self, AuggieMcpError> {
+    async fn spawn_with_flag(last_spawn_failed: Arc<AtomicBool>) -> Result<Self, AuggieMcpError> {
         match spawn_connection().await {
             Ok(connection) => {
                 last_spawn_failed.store(false, Ordering::Relaxed);
@@ -402,8 +400,8 @@ impl ExcerptBuilder {
 }
 
 fn parse_excerpts(response: &str) -> Result<Vec<AuggieExcerpt>, AuggieMcpError> {
-    let path_re = Regex::new(r"^\s*(?:[#>*-]\s*)*Path:\s*(.+?)\s*$")
-        .expect("auggie path regex is valid");
+    let path_re =
+        Regex::new(r"^\s*(?:[#>*-]\s*)*Path:\s*(.+?)\s*$").expect("auggie path regex is valid");
     let line_re = Regex::new(
         r"^\s*(?:\.\.\.\s*)?(?:L)?(\d+)(?:\s*(?:-|:|,|\.\.)\s*(?:L)?(\d+))?\s*(?:[:|]\s*)?(.*)$",
     )

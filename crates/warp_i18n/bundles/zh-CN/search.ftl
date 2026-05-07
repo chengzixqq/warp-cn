@@ -18,6 +18,7 @@ search-filter-placeholder-plans = 搜索计划
 search-filter-placeholder-natural-language = 例如：在文件中替换字符串
 search-filter-placeholder-actions = 搜索操作
 search-filter-placeholder-sessions = 搜索会话
+search-filter-placeholder-tabs = 搜索标签页
 search-filter-placeholder-conversations = 搜索会话
 search-filter-placeholder-historical-conversations = 搜索历史会话
 search-filter-placeholder-launch-configurations = 搜索启动配置

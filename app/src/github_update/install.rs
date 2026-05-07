@@ -192,8 +192,7 @@ async fn download_with_progress(
         total.store(len, Ordering::SeqCst);
     }
 
-    let mut file = fs::File::create(dest)
-        .with_context(|| format!("create {}", dest.display()))?;
+    let mut file = fs::File::create(dest).with_context(|| format!("create {}", dest.display()))?;
     let mut stream = resp.bytes_stream();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.with_context(|| format!("read body chunk {url}"))?;

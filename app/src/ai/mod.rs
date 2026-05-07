@@ -39,13 +39,13 @@ pub use request_usage_model::*;
 use warpui::AppContext;
 #[cfg(not(target_family = "wasm"))]
 pub mod agent_sdk;
-pub mod cloud_agent_config;
-pub mod cloud_agent_settings;
-pub mod cloud_environments;
 #[cfg(all(not(target_family = "wasm"), feature = "auggie_codebase_index"))]
 pub(crate) mod auggie_mcp;
 #[cfg(all(not(target_family = "wasm"), feature = "auggie_codebase_index"))]
 pub(crate) mod auggie_store_client;
+pub mod cloud_agent_config;
+pub mod cloud_agent_settings;
+pub mod cloud_environments;
 pub(crate) mod codebase_index_backend;
 pub mod execution_profiles;
 pub mod facts;

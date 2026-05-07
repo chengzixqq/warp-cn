@@ -1,29 +1,62 @@
+use crate::ai::active_agent_views_model::{ActiveAgentViewsModel, ConversationOrTaskId};
 use crate::ai::agent::api::ServerConversationToken;
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::ambient_agents::{AgentSource, AmbientAgentTask, AmbientAgentTaskId};
 use crate::ai::artifacts::Artifact;
 use crate::ai::blocklist::history_model::{AIConversationMetadata, BlocklistAIHistoryModel};
 use crate::ai::conversation_navigation::ConversationNavigationData;
-use crate::auth::AuthStateProvider;
+use crate::auth::{AuthStateProvider, UserUid};
+use crate::workspaces::user_profiles::UserProfiles;
 use chrono::{DateTime, Utc};
 use session_sharing_protocol::common::SessionId;
 use warp_cli::agent::Harness;
+use warp_core::features::FeatureFlag;
 use warpui::{AppContext, SingletonEntity};
 
 use super::{
     artifacts_match_filter, AgentManagementFilters, AgentRunDisplayStatus, ArtifactFilter,
-    ConversationMetadata, ConversationOrTask, CreatedOnFilter, CreatorFilter, EnvironmentFilter,
-    HarnessFilter, OwnerFilter, SourceFilter, StatusFilter,
+    ConversationMetadata, CreatedOnFilter, CreatorFilter, EnvironmentFilter, HarnessFilter,
+    OwnerFilter, SessionStatus, SourceFilter, StatusFilter,
 };
+
+const SESSION_EXPIRATION_TIME: chrono::Duration = chrono::Duration::weeks(1);
 
 /// Stable projection identity used by list and navigation surfaces.
 ///
 /// Task-backed rows use the ambient run ID even when they are attached to a local
 /// conversation, so task-specific affordances do not disappear when local data is present.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AgentConversationEntryId {
     AmbientRun(AmbientAgentTaskId),
     Conversation(AIConversationId),
+}
+
+impl AgentConversationEntryId {
+    pub fn as_key(&self) -> String {
+        match self {
+            AgentConversationEntryId::AmbientRun(id) => format!("task_{id}"),
+            AgentConversationEntryId::Conversation(id) => format!("conv_{id}"),
+        }
+    }
+}
+
+impl From<ConversationOrTaskId> for AgentConversationEntryId {
+    fn from(id: ConversationOrTaskId) -> Self {
+        match id {
+            ConversationOrTaskId::ConversationId(conversation_id) => {
+                AgentConversationEntryId::Conversation(conversation_id)
+            }
+            ConversationOrTaskId::TaskId(task_id) => AgentConversationEntryId::AmbientRun(task_id),
+        }
+    }
+}
+
+/// Navigation request input for resolving an entry or server-token handle at action time.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AgentConversationNavigationSubject {
+    Entry(AgentConversationEntryId),
+    #[allow(dead_code)]
+    ServerToken(ServerConversationToken),
 }
 
 /// Normalized row data for agent conversation list, management, and navigation surfaces.
@@ -61,6 +94,7 @@ pub struct AgentConversationDisplayData {
     pub creator: AgentConversationCreator,
     pub request_usage: Option<f32>,
     pub run_time: Option<String>,
+    pub session_status: Option<SessionStatus>,
     pub source: Option<AgentSource>,
     pub working_directory: Option<String>,
     pub environment_id: Option<String>,
@@ -223,12 +257,125 @@ pub(super) fn conversation_id_shadowed_by_task(
         })
 }
 
+pub(super) fn task_creator_name(task: &AmbientAgentTask, app: &AppContext) -> Option<String> {
+    task.creator_display_name().or_else(|| {
+        let uid = task.creator.as_ref().map(|creator| &creator.uid)?;
+        UserProfiles::as_ref(app).displayable_identifier_for_uid(UserUid::new(uid))
+    })
+}
+
+pub(super) fn task_creator_uid(task: &AmbientAgentTask) -> Option<String> {
+    task.creator.as_ref().map(|creator| creator.uid.clone())
+}
+
+fn current_user_name(app: &AppContext) -> Option<String> {
+    AuthStateProvider::as_ref(app).get().username_for_display()
+}
+
+fn current_user_uid(app: &AppContext) -> Option<String> {
+    AuthStateProvider::as_ref(app)
+        .get()
+        .user_id()
+        .map(|uid| uid.to_string())
+}
+
+fn task_session_id(task: &AmbientAgentTask) -> Option<SessionId> {
+    task.session_id.as_deref().and_then(parse_session_id)
+}
+
+fn task_session_status(task: &AmbientAgentTask) -> SessionStatus {
+    if FeatureFlag::CloudConversations.is_enabled() {
+        return if task.active_run_execution().session_link.is_some() {
+            SessionStatus::Available
+        } else {
+            SessionStatus::Unavailable
+        };
+    }
+
+    if task.active_run_execution().session_id.is_some() {
+        SessionStatus::Available
+    } else if (Utc::now() - task.created_at) > SESSION_EXPIRATION_TIME {
+        SessionStatus::Expired
+    } else {
+        SessionStatus::Unavailable
+    }
+}
+
+fn task_run_time(task: &AmbientAgentTask) -> Option<String> {
+    let Some(duration) = task.run_time() else {
+        return Some("Not started".to_string());
+    };
+    if duration.num_minutes() < 1 {
+        Some(format!("{} seconds", duration.num_seconds()))
+    } else {
+        Some(format!("{} minutes", duration.num_minutes()))
+    }
+}
+
+fn task_harness(task: &AmbientAgentTask) -> Option<Harness> {
+    task.agent_config_snapshot.as_ref().and_then(|config| {
+        config
+            .harness
+            .as_ref()
+            .map(|harness| harness.harness_type)
+            .or(Some(Harness::Oz))
+    })
+}
+
+fn conversation_title(
+    metadata: &ConversationMetadata,
+    history_model: &BlocklistAIHistoryModel,
+) -> String {
+    history_model
+        .conversation(&metadata.nav_data.id)
+        .and_then(|conversation| conversation.title().clone())
+        .unwrap_or(metadata.nav_data.title.clone())
+}
+
+fn conversation_display_status(
+    metadata: &ConversationMetadata,
+    history_model: &BlocklistAIHistoryModel,
+) -> AgentRunDisplayStatus {
+    history_model
+        .conversation(&metadata.nav_data.id)
+        .map(|conversation| AgentRunDisplayStatus::from_conversation_status(conversation.status()))
+        .unwrap_or(AgentRunDisplayStatus::ConversationSucceeded)
+}
+
+fn conversation_request_usage(
+    metadata: &ConversationMetadata,
+    history_model: &BlocklistAIHistoryModel,
+) -> Option<f32> {
+    history_model
+        .conversation(&metadata.nav_data.id)
+        .map(|conversation| conversation.credits_spent())
+        .or_else(|| {
+            history_model
+                .get_conversation_metadata(&metadata.nav_data.id)
+                .and_then(|metadata| metadata.credits_spent)
+        })
+}
+
+fn conversation_artifacts(
+    metadata: &ConversationMetadata,
+    history_model: &BlocklistAIHistoryModel,
+) -> Vec<Artifact> {
+    history_model
+        .conversation(&metadata.nav_data.id)
+        .map(|conversation| conversation.artifacts().to_vec())
+        .or_else(|| {
+            history_model
+                .get_conversation_metadata(&metadata.nav_data.id)
+                .map(|metadata| metadata.artifacts.clone())
+        })
+        .unwrap_or_default()
+}
+
 pub(super) fn entry_for_task(
     task: &AmbientAgentTask,
     history_model: &BlocklistAIHistoryModel,
     app: &AppContext,
 ) -> AgentConversationEntry {
-    let item = ConversationOrTask::Task(task);
     let local_conversation_id = conversation_id_shadowed_by_task(task, history_model);
     let conversation_metadata =
         local_conversation_id.and_then(|id| history_model.get_conversation_metadata(&id));
@@ -240,7 +387,21 @@ pub(super) fn entry_for_task(
                 server_conversation_token_for_conversation(conversation_id, None, history_model)
             })
         });
-    let status = item.display_status(app);
+    let status = AgentRunDisplayStatus::from_task(task, app);
+    let has_active_session_id = task
+        .active_execution_session_id()
+        .and_then(parse_session_id)
+        .is_some();
+    let has_open_ambient_session = ActiveAgentViewsModel::as_ref(app)
+        .get_terminal_view_id_for_ambient_task(task.task_id)
+        .is_some();
+    let can_open = has_open_ambient_session
+        || has_active_session_id
+        || local_conversation_id.is_some()
+        || server_conversation_token.is_some();
+    let can_copy_link = task.has_active_execution()
+        && task.active_run_execution().session_link.is_some()
+        || server_conversation_token.is_some();
 
     AgentConversationEntry {
         id: AgentConversationEntryId::AmbientRun(task.task_id),
@@ -248,26 +409,31 @@ pub(super) fn entry_for_task(
             local_conversation_id,
             ambient_agent_task_id: Some(task.task_id),
             server_conversation_token,
-            session_id: item.session_id(),
+            session_id: task_session_id(task),
         },
         provenance: AgentConversationProvenance::AmbientRun,
         display: AgentConversationDisplayData {
-            title: item.title(app),
+            title: task.title.clone(),
             initial_query: Some(task.prompt.clone()),
-            created_at: item.created_at(),
-            last_updated: item.last_updated(),
+            created_at: task.created_at,
+            last_updated: task.updated_at,
             status: status.clone(),
             creator: AgentConversationCreator {
-                name: item.creator_name(app),
-                uid: item.creator_uid(app),
+                name: task_creator_name(task, app),
+                uid: task_creator_uid(task),
             },
-            request_usage: item.request_usage(app),
-            run_time: item.run_time(),
-            source: item.source().cloned(),
-            working_directory: None,
-            environment_id: item.environment_id().map(ToString::to_string),
-            harness: item.harness(app),
-            artifacts: item.artifacts(app),
+            request_usage: task.credits_used(),
+            run_time: task_run_time(task),
+            session_status: Some(task_session_status(task)),
+            source: task.source.clone(),
+            working_directory: conversation_metadata
+                .and_then(|metadata| metadata.initial_working_directory.clone()),
+            environment_id: task
+                .agent_config_snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.environment_id.clone()),
+            harness: task_harness(task),
+            artifacts: task.artifacts.clone(),
         },
         backing: AgentConversationBackingData {
             has_loaded_conversation: local_conversation_id
@@ -279,8 +445,8 @@ pub(super) fn entry_for_task(
             has_ambient_run: true,
         },
         capabilities: AgentConversationCapabilities {
-            can_open: item.get_open_action(None, app).is_some(),
-            can_copy_link: item.session_or_conversation_link(app).is_some(),
+            can_open,
+            can_copy_link,
             can_share: task.conversation_id().is_some()
                 || local_conversation_id
                     .is_some_and(|id| history_model.can_conversation_be_shared(&id)),
@@ -321,9 +487,8 @@ fn entry_for_conversation_parts(
     app: &AppContext,
 ) -> AgentConversationEntry {
     let metadata = ConversationMetadata { nav_data };
-    let item = ConversationOrTask::Conversation(&metadata);
     let conversation_id = metadata.nav_data.id;
-    let status = item.display_status(app);
+    let status = conversation_display_status(&metadata, history_model);
     let has_loaded_conversation = history_model.conversation(&conversation_id).is_some();
     let has_local_persisted_data = conversation_metadata
         .is_some_and(|metadata| metadata.has_local_data)
@@ -357,18 +522,19 @@ fn entry_for_conversation_parts(
         },
         provenance,
         display: AgentConversationDisplayData {
-            title: item.title(app),
+            title: conversation_title(&metadata, history_model),
             initial_query: metadata.nav_data.initial_query.clone(),
-            created_at: item.created_at(),
-            last_updated: item.last_updated(),
+            created_at: metadata.nav_data.last_updated.into(),
+            last_updated: metadata.nav_data.last_updated.into(),
             status: status.clone(),
             creator: AgentConversationCreator {
-                name: item.creator_name(app),
-                uid: item.creator_uid(app),
+                name: current_user_name(app),
+                uid: current_user_uid(app),
             },
-            request_usage: item.request_usage(app),
-            run_time: item.run_time(),
-            source: item.source().cloned(),
+            request_usage: conversation_request_usage(&metadata, history_model),
+            run_time: None,
+            session_status: None,
+            source: Some(AgentSource::Interactive),
             working_directory: metadata
                 .nav_data
                 .latest_working_directory
@@ -378,8 +544,8 @@ fn entry_for_conversation_parts(
             harness: conversation_metadata
                 .and_then(|metadata| metadata.server_conversation_metadata.as_ref())
                 .map(|metadata| Harness::from(metadata.harness))
-                .or_else(|| item.harness(app)),
-            artifacts: item.artifacts(app),
+                .or(Some(Harness::Oz)),
+            artifacts: conversation_artifacts(&metadata, history_model),
         },
         backing: AgentConversationBackingData {
             has_loaded_conversation,
@@ -389,8 +555,13 @@ fn entry_for_conversation_parts(
                 .is_some_and(AIConversationMetadata::is_ambient_agent_conversation),
         },
         capabilities: AgentConversationCapabilities {
-            can_open: item.get_open_action(None, app).is_some(),
-            can_copy_link: item.session_or_conversation_link(app).is_some(),
+            can_open: has_local_persisted_data || has_cloud_data,
+            can_copy_link: server_conversation_token_for_conversation(
+                conversation_id,
+                Some(&metadata.nav_data),
+                history_model,
+            )
+            .is_some(),
             can_share: history_model.can_conversation_be_shared(&conversation_id),
             can_delete: has_local_persisted_data,
             can_fork_locally: has_local_persisted_data,
@@ -414,4 +585,14 @@ fn server_conversation_token_for_conversation(
                 .and_then(|metadata| metadata.server_conversation_token.clone())
         })
         .or_else(|| nav_data.and_then(|nav_data| nav_data.server_conversation_token.clone()))
+}
+
+pub(super) fn parse_session_id(session_id: &str) -> Option<SessionId> {
+    match session_id.parse::<SessionId>() {
+        Ok(session_id) => Some(session_id),
+        Err(e) => {
+            log::warn!("Failed to parse shared session ID: {e}");
+            None
+        }
+    }
 }

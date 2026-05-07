@@ -1284,8 +1284,7 @@ impl GithubVersionInfoWidget {
         // `CrossAxisAlignment::End` keeps the shorter of the two rows flush
         // against the right edge of the panel; default Start would left-align
         // last-checked under a wider status_content.
-        let mut right_column =
-            Flex::column().with_cross_axis_alignment(CrossAxisAlignment::End);
+        let mut right_column = Flex::column().with_cross_axis_alignment(CrossAxisAlignment::End);
         let mut right_has_content = false;
         if let Some(status_content) = status_content {
             right_column.add_child(
@@ -1310,10 +1309,7 @@ impl GithubVersionInfoWidget {
                 .and_then(|secs| chrono::Local.timestamp_opt(secs, 0).single())
             {
                 let formatted = dt.format("%Y-%m-%d %H:%M").to_string();
-                let line = warp_i18n::t!(
-                    "settings-account-update-last-checked",
-                    time = formatted,
-                );
+                let line = warp_i18n::t!("settings-account-update-last-checked", time = formatted,);
                 let mut container = Container::new(
                     Text::new_inline(line, appearance.ui_font_family(), REGULAR_TEXT_FONT_SIZE)
                         .with_color(faded_text_color)

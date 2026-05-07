@@ -167,6 +167,9 @@ pub enum QueryFilter {
     /// Filter results for open sessions.
     Sessions,
 
+    /// Filter results for open tabs.
+    Tabs,
+
     /// Filter results for all conversations.
     Conversations,
 
@@ -239,6 +242,7 @@ impl QueryFilter {
             QueryFilter::NaturalLanguage => "search-filter-placeholder-natural-language",
             QueryFilter::Actions => "search-filter-placeholder-actions",
             QueryFilter::Sessions => "search-filter-placeholder-sessions",
+            QueryFilter::Tabs => "search-filter-placeholder-tabs",
             QueryFilter::Conversations => "search-filter-placeholder-conversations",
             QueryFilter::HistoricalConversations => {
                 "search-filter-placeholder-historical-conversations"
@@ -278,6 +282,7 @@ impl QueryFilter {
             QueryFilter::NaturalLanguage => &NATURAL_LANGUAGE_FILTER_ATOM,
             QueryFilter::Actions => &ACTIONS_FILTER_ATOM,
             QueryFilter::Sessions => &SESSIONS_FILTER_ATOM,
+            QueryFilter::Tabs => &NO_FILTER_ATOM,
             QueryFilter::Conversations => &CONVERSATIONS_FILTER_ATOM,
             QueryFilter::LaunchConfigurations => &LAUNCH_CONFIG_FILTER_ATOM,
             QueryFilter::Drive => &DRIVE_FILTER_ATOM,
@@ -310,6 +315,7 @@ impl QueryFilter {
             QueryFilter::NaturalLanguage => "AI command suggestions",
             QueryFilter::Actions => "actions",
             QueryFilter::Sessions => "sessions",
+            QueryFilter::Tabs => "tabs",
             QueryFilter::Conversations => "conversations",
             QueryFilter::LaunchConfigurations => "launch configurations",
             QueryFilter::Drive => "Warp Drive",
@@ -347,6 +353,7 @@ impl QueryFilter {
             }
             QueryFilter::Actions => None,
             QueryFilter::Sessions => Some("bundled/svg/terminal-input.svg"),
+            QueryFilter::Tabs => Some("bundled/svg/terminal-input.svg"),
             QueryFilter::Conversations | QueryFilter::HistoricalConversations => {
                 Some("bundled/svg/conversation.svg")
             }

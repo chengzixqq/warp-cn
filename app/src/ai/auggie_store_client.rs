@@ -216,13 +216,9 @@ impl StoreClient for AuggieStoreClient {
                 }
             };
 
-            let Some(content_hash) = match_excerpt_to_fragment(
-                &cache,
-                &absolute_path,
-                &excerpt_range,
-                &excerpt.content,
-            )
-            .await
+            let Some(content_hash) =
+                match_excerpt_to_fragment(&cache, &absolute_path, &excerpt_range, &excerpt.content)
+                    .await
             else {
                 continue;
             };
@@ -338,7 +334,9 @@ fn byte_overlap(a: &Range<ByteOffset>, b: &Range<ByteOffset>) -> usize {
 }
 
 async fn read_cached_fragment_content(fragment: &CachedFragment) -> Option<String> {
-    let content = async_fs::read_to_string(&fragment.absolute_path).await.ok()?;
+    let content = async_fs::read_to_string(&fragment.absolute_path)
+        .await
+        .ok()?;
     let start = fragment.byte_range.start.as_usize();
     let end = fragment.byte_range.end.as_usize();
 
@@ -452,17 +450,22 @@ mod tests {
         let file_path = dunce::canonicalize(&file_path).unwrap();
         let content_hash = ContentHash::from_content(content);
         let root_hash = node_hash("root");
-        let store = AuggieStoreClient::new(Arc::new(MockAuggieMcpClient::new(vec![AuggieExcerpt {
-            path: PathBuf::from("main.rs"),
-            line_start: 2,
-            line_end: 2,
-            content: "beta".to_string(),
-        }])));
+        let store =
+            AuggieStoreClient::new(Arc::new(MockAuggieMcpClient::new(vec![AuggieExcerpt {
+                path: PathBuf::from("main.rs"),
+                line_start: 2,
+                line_end: 2,
+                content: "beta".to_string(),
+            }])));
 
         store
             .generate_embeddings(
                 EmbeddingConfig::default(),
-                vec![test_fragment(content, &file_path, byte_range(0, content.len()))],
+                vec![test_fragment(
+                    content,
+                    &file_path,
+                    byte_range(0, content.len()),
+                )],
                 root_hash.clone(),
                 repo_metadata(&repo_path),
             )
@@ -547,17 +550,22 @@ mod tests {
         let outside_path = dunce::canonicalize(&outside_path).unwrap();
 
         let root_hash = node_hash("root");
-        let store = AuggieStoreClient::new(Arc::new(MockAuggieMcpClient::new(vec![AuggieExcerpt {
-            path: outside_path,
-            line_start: 1,
-            line_end: 1,
-            content: "outside".to_string(),
-        }])));
+        let store =
+            AuggieStoreClient::new(Arc::new(MockAuggieMcpClient::new(vec![AuggieExcerpt {
+                path: outside_path,
+                line_start: 1,
+                line_end: 1,
+                content: "outside".to_string(),
+            }])));
 
         store
             .generate_embeddings(
                 EmbeddingConfig::default(),
-                vec![test_fragment(content, &file_path, byte_range(0, content.len()))],
+                vec![test_fragment(
+                    content,
+                    &file_path,
+                    byte_range(0, content.len()),
+                )],
                 root_hash.clone(),
                 repo_metadata(&repo_path),
             )

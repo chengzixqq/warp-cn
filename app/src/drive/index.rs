@@ -41,7 +41,7 @@ use crate::{
         icons::{Icon, ICON_DIMENSIONS},
         menu_button::{icon_button_with_context_menu, MenuDirection},
     },
-    util::{color::coloru_with_opacity, sync::Condition},
+    util::color::coloru_with_opacity,
     view_components::{Dropdown, DropdownItem},
     workflows::{CloudWorkflow, WorkflowViewMode},
     workspace::active_terminal_in_window,
@@ -83,6 +83,7 @@ use std::{any::Any, collections::HashMap, sync::Arc};
 use url::Url;
 use warp_core::{context_flag::ContextFlag, settings::Setting, ui::theme::color::internal_colors};
 use warp_i18n::t;
+use warp_util::sync::Condition;
 use warpui::{
     clipboard::ClipboardContent,
     elements::{
