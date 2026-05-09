@@ -542,36 +542,43 @@ fn resolve_provider() -> Option<ResolvedProvider> {
 
 fn resolve_from_snapshot() -> Option<ResolvedProvider> {
     let snap = ::ai::direct_backend::current_snapshot();
-    if !snap.enabled {
-        return None;
+    // Auto-derive active provider: whichever has a non-empty `api_key` in
+    // the override wins (same priority order as the single-call path).
+    // The snapshot's `enabled` and `active` fields are intentionally ignored
+    // — there's no UI toggle anymore; the presence of a key implies "use it".
+    for kind in [
+        DirectProviderKind::Anthropic,
+        DirectProviderKind::OpenAi,
+        DirectProviderKind::Gemini,
+    ] {
+        let overrides = match kind {
+            DirectProviderKind::Anthropic => &snap.anthropic,
+            DirectProviderKind::OpenAi => &snap.openai,
+            DirectProviderKind::Gemini => &snap.gemini,
+            DirectProviderKind::OpenAiCompatible => continue,
+        };
+        let api_key = overrides.api_key.trim();
+        if api_key.is_empty() {
+            continue;
+        }
+        let base_url = if overrides.base_url.trim().is_empty() {
+            default_base_url(kind).to_string()
+        } else {
+            overrides.base_url.trim().trim_end_matches('/').to_string()
+        };
+        let model_id = if overrides.model_id.trim().is_empty() {
+            default_model_id(kind).to_string()
+        } else {
+            overrides.model_id.trim().to_string()
+        };
+        return Some(ResolvedProvider {
+            kind,
+            api_key: api_key.to_string(),
+            base_url,
+            model_id,
+        });
     }
-    let kind = snap.active;
-    let overrides = match kind {
-        DirectProviderKind::OpenAi => &snap.openai,
-        DirectProviderKind::Anthropic => &snap.anthropic,
-        DirectProviderKind::Gemini => &snap.gemini,
-        DirectProviderKind::OpenAiCompatible => &snap.openai_compatible,
-    };
-    let api_key = overrides.api_key.trim();
-    if api_key.is_empty() {
-        return None;
-    }
-    let base_url = if overrides.base_url.trim().is_empty() {
-        default_base_url(kind).to_string()
-    } else {
-        overrides.base_url.trim().trim_end_matches('/').to_string()
-    };
-    let model_id = if overrides.model_id.trim().is_empty() {
-        default_model_id(kind).to_string()
-    } else {
-        overrides.model_id.trim().to_string()
-    };
-    Some(ResolvedProvider {
-        kind,
-        api_key: api_key.to_string(),
-        base_url,
-        model_id,
-    })
+    None
 }
 
 fn resolve_from_env() -> Option<ResolvedProvider> {

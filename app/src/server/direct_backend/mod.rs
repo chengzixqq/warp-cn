@@ -62,28 +62,25 @@ pub trait LlmBackend: Send + Sync + 'static {
     ) -> Result<GeneratedCommandMetadata, GeneratedCommandMetadataError>;
 }
 
-/// Returns the active backend, or `None` if Direct mode is disabled (compile-
-/// time, runtime flag, user toggle) or no usable credentials are configured.
+/// Returns the active backend, or `None` if Direct mode can't be assembled
+/// (no compile-time feature, no runtime flag, or no credentials anywhere).
 ///
 /// Resolution order:
-///   1. `DirectBackendConfig` (the future settings-page UI).
-///   2. `WARP_CN_*` env vars (dev/QA entry point, lets the M2 path be exercised
-///      end-to-end before the M3 settings UI lands).
+///   1. `DirectBackendConfig` (settings-page UI: per-provider Base URL +
+///      optional API key overrides) merged with `ApiKeyManager` keys.
+///   2. `WARP_CN_*` env vars (headless / dev / QA entry point).
+///
+/// Active provider is auto-derived: whichever key in `ApiKeyManager` (or the
+/// `DirectBackendConfig` override) is non-empty wins, in priority order
+/// Anthropic > OpenAI > Gemini. The settings UI no longer needs a master
+/// toggle or "Set Active" button — having a key implies "use it".
 pub fn active_backend(ctx: &AppContext) -> Option<Arc<dyn LlmBackend>> {
     if !FeatureFlag::DirectLlmBackend.is_enabled() {
         return None;
     }
-
-    let resolved = {
-        let config = DirectBackendConfig::as_ref(ctx);
-        if config.is_enabled() {
-            resolve(config, ApiKeyManager::as_ref(ctx))
-        } else {
-            None
-        }
-    }
-    .or_else(resolve_from_env)?;
-
+    let config = DirectBackendConfig::as_ref(ctx);
+    let api_keys = ApiKeyManager::as_ref(ctx);
+    let resolved = resolve(config, api_keys).or_else(resolve_from_env)?;
     instantiate(resolved)
 }
 
@@ -147,19 +144,28 @@ fn default_model_id(kind: DirectProviderKind) -> &'static str {
 }
 
 fn resolve(config: &DirectBackendConfig, api_keys: &ApiKeyManager) -> Option<ResolvedProvider> {
-    let kind = config.active_provider();
-    let overrides = config.overrides_for(kind);
-
-    let api_key = pick_api_key(kind, overrides, api_keys)?;
-    let base_url = pick_base_url(kind, overrides);
-    let model_id = pick_model_id(kind, overrides);
-
-    Some(ResolvedProvider {
-        kind,
-        api_key,
-        base_url,
-        model_id,
-    })
+    // Auto-derive: whichever provider has a usable key wins. Priority order
+    // is Anthropic > OpenAI > Gemini (Claude is the strongest tool-using
+    // model in 2026); within each, override key beats `ApiKeyManager` key.
+    // OpenAI-compatible is handled implicitly: if the OpenAI Base URL is
+    // overridden to a non-default host, the user is pointing at a gateway
+    // and we still dispatch through the OpenAI client.
+    for kind in [
+        DirectProviderKind::Anthropic,
+        DirectProviderKind::OpenAi,
+        DirectProviderKind::Gemini,
+    ] {
+        let overrides = config.overrides_for(kind);
+        if let Some(api_key) = pick_api_key(kind, overrides, api_keys) {
+            return Some(ResolvedProvider {
+                kind,
+                api_key,
+                base_url: pick_base_url(kind, overrides),
+                model_id: pick_model_id(kind, overrides),
+            });
+        }
+    }
+    None
 }
 
 /// Picks the API key. Priority: per-provider override (filled via Direct LLM
