@@ -8813,5 +8813,5 @@ pub fn position_id_for_first_cursor(editor_view_id: EntityId) -> String {
 }
 
 #[cfg(test)]
-#[path = "mod_test.rs"]
+#[path = "mod_tests.rs"]
 mod tests;

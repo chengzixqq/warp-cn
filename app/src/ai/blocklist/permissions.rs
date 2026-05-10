@@ -1310,5 +1310,5 @@ pub fn is_agent_mode_autonomy_allowed(ctx: &AppContext) -> bool {
 }
 
 #[cfg(test)]
-#[path = "permissions_test.rs"]
+#[path = "permissions_tests.rs"]
 mod tests;

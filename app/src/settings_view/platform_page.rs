@@ -119,13 +119,11 @@ impl PlatformPageView {
         );
     }
     pub fn new(ctx: &mut ViewContext<PlatformPageView>) -> Self {
-        // Create the modal body
         let create_api_key_body = ctx.add_typed_action_view(CreateApiKeyModal::new);
         ctx.subscribe_to_view(&create_api_key_body, |me, _, event, ctx| {
             me.handle_create_api_key_modal_event(event, ctx);
         });
 
-        // Create the modal wrapper
         let create_api_key_modal_view = ctx.add_typed_action_view(|ctx| {
             Modal::new(
                 Some(warp_i18n::t!("settings-platform-new-api-key")),
@@ -177,7 +175,6 @@ impl PlatformPageView {
     }
 
     fn show_create_api_key_modal(&mut self, ctx: &mut ViewContext<Self>) {
-        // Ensure header reads "New API key" when opening the form
         self.create_api_key_modal_state
             .set_title(Some(warp_i18n::t!("settings-platform-new-api-key")), ctx);
         self.create_api_key_modal_state.open(ctx);
@@ -207,11 +204,8 @@ impl PlatformPageView {
                 self.hide_create_api_key_modal(ctx);
             }
             CreateApiKeyModalEvent::Created { api_key } => {
-                // Switch modal header off for success screen
                 self.create_api_key_modal_state
                     .set_title(Some(warp_i18n::t!("settings-platform-save-your-key")), ctx);
-                // Append to list locally
-                // Ensure the per-key expire button exists
                 let uid = api_key.uid.clone().into_inner();
                 self.ensure_expire_button_for_key(ctx, uid.clone());
 
@@ -232,7 +226,6 @@ impl PlatformPageView {
                 ctx.notify();
             }
             CreateApiKeyModalEvent::Error { message } => {
-                // Show an error toast with the provided message
                 let window_id = ctx.window_id();
                 crate::ToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
                     let toast = crate::view_components::DismissibleToast::error(message.clone());
@@ -326,6 +319,11 @@ struct APIKeyProperties {
 enum ApiKeyScope {
     Personal,
     Team,
+    /// Not yet constructed — the server doesn't distinguish agent-scoped keys
+    /// from team keys yet, but the create modal already supports the Agent
+    /// type and the render path needs this variant for display.
+    #[allow(dead_code)]
+    Agent,
 }
 
 impl APIKeyProperties {
@@ -488,7 +486,7 @@ impl PlatformPageWidget {
             )
             .finish(),
         );
-        if FeatureFlag::TeamApiKeys.is_enabled() {
+        if FeatureFlag::TeamApiKeys.is_enabled() || FeatureFlag::NamedAgents.is_enabled() {
             header_row.add_child(
                 Expanded::new(
                     1.,
@@ -618,10 +616,11 @@ impl PlatformPageWidget {
             )
             .finish(),
         );
-        if FeatureFlag::TeamApiKeys.is_enabled() {
+        if FeatureFlag::TeamApiKeys.is_enabled() || FeatureFlag::NamedAgents.is_enabled() {
             let scope_display = match key.scope {
                 ApiKeyScope::Personal => warp_i18n::t!("settings-platform-scope-personal"),
                 ApiKeyScope::Team => warp_i18n::t!("settings-platform-scope-team"),
+                ApiKeyScope::Agent => warp_i18n::t!("settings-platform-scope-agent"),
             };
             row.add_child(
                 Expanded::new(

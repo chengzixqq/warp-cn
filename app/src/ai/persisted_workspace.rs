@@ -305,7 +305,8 @@ impl PersistedWorkspace {
             test,
             feature = "fast_dev",
             feature = "integration_tests"
-        )) {
+        )) && CodebaseIndexManager::as_ref(ctx).is_indexing_enabled()
+        {
             ctx.subscribe_to_model(&DetectedRepositories::handle(ctx), |me, event, ctx| {
                 let DetectedRepositoriesEvent::DetectedGitRepo { repository, .. } = event;
                 let repo_path = repository.as_ref(ctx).root_dir().to_local_path_lossy();
@@ -626,6 +627,9 @@ impl PersistedWorkspace {
     /// Enables or disables codebase indexing according to the setting.
     fn maybe_enable_codebase_indexing(ctx: &mut ModelContext<Self>) {
         CodebaseIndexManager::handle(ctx).update(ctx, |manager, ctx| {
+            if !manager.is_indexing_enabled() {
+                return;
+            }
             if crate::ai::codebase_index_backend::is_codebase_context_enabled_for_indexing(ctx) {
                 Self::enable_codebase_indexing(manager, ctx);
             } else {

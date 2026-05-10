@@ -152,4 +152,4 @@ command-slash-prompts-desc = 搜索已保存的提示词
 command-slash-rewind-desc = 回退到会话中的先前位置
 command-slash-export-to-clipboard-desc = 以 Markdown 格式将当前会话导出到剪贴板
 command-slash-export-to-file-desc = 将当前会话导出为 Markdown 文件
-command-slash-move-to-cloud-desc = 把当前对话移交给云端智能体
+command-slash-handoff-desc = 把当前对话移交给云端智能体

@@ -16,6 +16,7 @@ settings-platform-col-last-used = Last used
 settings-platform-col-expires-at = Expires at
 settings-platform-scope-personal = Personal
 settings-platform-scope-team = Team
+settings-platform-scope-agent = Agent
 
 settings-environments-no-match = No environments match your search.
 settings-environments-empty-title = You haven't set up any environments yet.

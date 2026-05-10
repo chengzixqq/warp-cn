@@ -16,6 +16,7 @@ settings-platform-col-last-used = 最后使用
 settings-platform-col-expires-at = 过期时间
 settings-platform-scope-personal = 个人
 settings-platform-scope-team = 团队
+settings-platform-scope-agent = 智能体
 
 settings-environments-no-match = 没有匹配您搜索的环境。
 settings-environments-empty-title = 您尚未设置任何环境。

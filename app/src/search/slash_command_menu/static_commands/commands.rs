@@ -172,12 +172,13 @@ pub static FORK: LazyLock<StaticCommand> = LazyLock::new(|| {
 });
 
 pub static MOVE_TO_CLOUD: LazyLock<StaticCommand> = LazyLock::new(|| StaticCommand {
-    name: "/move-to-cloud",
-    description_key: "command-slash-move-to-cloud-desc",
+    name: "/handoff",
+    description_key: "command-slash-handoff-desc",
     icon_path: "bundled/svg/upload-cloud-01.svg",
     availability: Availability::AGENT_VIEW
         | Availability::ACTIVE_CONVERSATION
-        | Availability::AI_ENABLED,
+        | Availability::AI_ENABLED
+        | Availability::NOT_CLOUD_AGENT,
     auto_enter_ai_mode: false,
     argument: Some(
         Argument::optional()

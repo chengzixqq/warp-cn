@@ -153,4 +153,4 @@ command-slash-prompts-desc = Search saved prompts
 command-slash-rewind-desc = Rewind to a previous point in the conversation
 command-slash-export-to-clipboard-desc = Export current conversation to clipboard in markdown format
 command-slash-export-to-file-desc = Export current conversation to a markdown file
-command-slash-move-to-cloud-desc = Hand off this conversation to a cloud agent
+command-slash-handoff-desc = Hand off this conversation to a cloud agent

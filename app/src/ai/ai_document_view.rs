@@ -102,7 +102,9 @@ use crate::util::openable_file_type::FileTarget;
 use warp_util::path::LineAndColumnArg;
 
 // Import keybinding constants from code view to ensure consistency
+use crate::code::view::{SAVE_FILE_BINDING_DESCRIPTION, SAVE_FILE_BINDING_NAME};
 use crate::code::view::{save_file_binding_description, SAVE_FILE_BINDING_NAME};
+use crate::notebooks::file::MarkdownDisplayMode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AIDocumentAction {
@@ -331,7 +333,9 @@ impl AIDocumentView {
                     let appearance = Appearance::as_ref(ctx);
                     let font_settings = FontSettings::as_ref(ctx);
                     let styles = rich_text_styles(appearance, font_settings);
-                    NotebooksEditorModel::new_unbound(styles, ctx)
+                    let mut model = NotebooksEditorModel::new_unbound(styles, ctx);
+                    model.set_default_mermaid_display_mode(MarkdownDisplayMode::Rendered, ctx);
+                    model
                 })
             });
 

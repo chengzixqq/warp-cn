@@ -84,14 +84,9 @@ terminal-link-open-link = 打开链接
 terminal-zero-new-session = 新建终端会话
 terminal-zero-dont-show-again = 不再显示
 terminal-ssh-dont-ask-again = 不再询问
-# SSH 远程服务端启动失败横幅（按失败种类提供标题与描述）
-terminal-ssh-failed-banner-title-binary-check = SSH 扩展无法验证
-terminal-ssh-failed-banner-title-binary-install = SSH 扩展无法安装
-terminal-ssh-failed-banner-title-launch = SSH 扩展无法启动
-terminal-ssh-failed-banner-desc-binary-check = 无法在远程主机上验证 SSH 扩展二进制文件。虽然文件浏览、代码审查等高级功能暂不可用，但 Warpify 体验的其他部分仍完全可用。
-terminal-ssh-failed-banner-desc-binary-install = 二进制文件无法写入或在远程主机上执行。虽然文件浏览、代码审查等高级功能暂不可用，但 Warpify 体验的其他部分仍完全可用。
-terminal-ssh-failed-banner-desc-launch = 无法在远程主机上启动 SSH 扩展。虽然文件浏览、代码审查等高级功能暂不可用，但 Warpify 体验的其他部分仍完全可用。
-terminal-ssh-failed-banner-error-line = 错误：{$detail}
+# SSH 远程服务端启动失败横幅
+terminal-ssh-failed-banner-title = 无法连接到 Warp SSH 扩展
+terminal-ssh-failed-banner-body = 文件浏览、代码审查等高级功能暂不可用，但 Warpify 体验的其他部分仍完全可用。
 terminal-shared-snapshot-title = 你正在查看快照
 terminal-shared-snapshot-desc = 此共享会话显示打开时的状态。若智能体仍在运行，请刷新以查看最新进度。
 terminal-init-env-mode-prompt = 选择你希望如何设置环境

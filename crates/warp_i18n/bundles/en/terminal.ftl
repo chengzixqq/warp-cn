@@ -84,14 +84,9 @@ terminal-link-open-link = Open link
 terminal-zero-new-session = New terminal session
 terminal-zero-dont-show-again = Don't show again
 terminal-ssh-dont-ask-again = Don't ask me this again
-# SSH remote-server failed banner (per-failure-kind title + description)
-terminal-ssh-failed-banner-title-binary-check = SSH extension couldn't be verified
-terminal-ssh-failed-banner-title-binary-install = SSH extension couldn't be installed
-terminal-ssh-failed-banner-title-launch = SSH extension couldn't be started
-terminal-ssh-failed-banner-desc-binary-check = The SSH extension binary could not be verified on the remote host. While advanced features like file browsing and code review are currently disabled, the rest of your Warpified experience is fully available.
-terminal-ssh-failed-banner-desc-binary-install = The binary could not be written or executed on the remote host. While advanced features like file browsing and code review are currently disabled, the rest of your Warpified experience is fully available.
-terminal-ssh-failed-banner-desc-launch = The SSH extension could not be started on the remote host. While advanced features like file browsing and code review are currently disabled, the rest of your Warpified experience is fully available.
-terminal-ssh-failed-banner-error-line = ERROR: {$detail}
+# SSH remote-server failed banner
+terminal-ssh-failed-banner-title = Couldn't connect to the Warp SSH extension
+terminal-ssh-failed-banner-body = While advanced features like file browsing and code review are currently disabled, the rest of your Warpified experience is fully available.
 terminal-shared-snapshot-title = You're viewing a snapshot
 terminal-shared-snapshot-desc = This shared conversation shows the state when you opened it. If the agent is still running, refresh to see the latest progress.
 terminal-init-env-mode-prompt = Choose how you'd like to set up your environment
