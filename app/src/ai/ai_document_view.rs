@@ -102,8 +102,7 @@ use crate::util::openable_file_type::FileTarget;
 use warp_util::path::LineAndColumnArg;
 
 // Import keybinding constants from code view to ensure consistency
-use crate::code::view::{SAVE_FILE_BINDING_DESCRIPTION, SAVE_FILE_BINDING_NAME};
-use crate::code::view::{save_file_binding_description, SAVE_FILE_BINDING_NAME};
+use crate::code::view::{SAVE_FILE_BINDING_NAME, save_file_binding_description};
 use crate::notebooks::file::MarkdownDisplayMode;
 
 #[derive(Debug, Clone, PartialEq)]
