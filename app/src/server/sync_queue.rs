@@ -435,8 +435,24 @@ impl SyncQueue {
     /// Enqueue a new request.
     pub fn enqueue(&mut self, item: QueueItem, ctx: &mut ModelContext<Self>) -> QueueItemId {
         let queue_id = QueueItemId::new();
-        let mut queue_item = item;
 
+        // warp-cn fork: in Direct LLM mode the Warp Drive backend is
+        // unreachable. The in-memory `CloudModel` and its SQLite mirror have
+        // already been updated by the upstream `create_object` / `update_object`
+        // call site, so we drop the queue item rather than firing 401-bound
+        // mutations at `app.warp.dev`. Trade-off: per-object sync indicators
+        // can stick on "pending"; AIFact/Memory and other settings-managed
+        // objects don't render in Warp Drive so the cosmetic impact is
+        // negligible. Wider polish (synthetic success events) is tracked for
+        // a follow-up if needed.
+        #[cfg(feature = "direct_llm_backend")]
+        if warp_core::features::FeatureFlag::DirectLlmBackend.is_enabled() {
+            log::trace!("DirectLlmBackend on: skipping SyncQueue::enqueue for {item:?}");
+            let _ = item;
+            return queue_id;
+        }
+
+        let mut queue_item = item;
         self.add_inferred_dependencies(&mut queue_item, &queue_id, ctx);
         self.queue.push((queue_id, queue_item));
         self.dequeue(ctx);

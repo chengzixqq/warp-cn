@@ -1314,6 +1314,12 @@ pub(crate) fn initialize_app(
         manager
     });
 
+    // warp-cn fork: per-provider base_url + custom model_id overrides for the
+    // Direct LLM backend. Registered alongside ApiKeyManager so settings UI
+    // can read both via `as_ref(ctx)` without ordering ceremony.
+    #[cfg(feature = "direct_llm_backend")]
+    ctx.add_singleton_model(::ai::direct_backend::DirectBackendConfig::new);
+
     ctx.add_singleton_model(AntivirusInfo::new);
 
     cfg_if::cfg_if! {
@@ -2655,6 +2661,15 @@ pub fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::FullSourceCodeEmbedding,
         #[cfg(feature = "auggie_codebase_index")]
         FeatureFlag::AuggieCodebaseIndex,
+        // warp-cn fork: pair the cargo feature with the runtime flag so debug
+        // builds also short-circuit AI traffic. Without this the flag was only
+        // toggled in release bundles via `RELEASE_FLAGS`, leaving every dev
+        // build to fall through `multi_agent::run`'s short-circuit and bail on
+        // `skip_login` at the auth layer.
+        #[cfg(feature = "direct_llm_backend")]
+        FeatureFlag::DirectLlmBackend,
+        #[cfg(feature = "direct_llm_backend")]
+        FeatureFlag::SoloUserByok,
         #[cfg(feature = "use_tantivy_search")]
         FeatureFlag::UseTantivySearch,
         #[cfg(feature = "grep_tool")]

@@ -2613,11 +2613,20 @@ impl WorkflowView {
 
     fn issue_request(&mut self, ctx: &mut ViewContext<Self>) {
         let ai_client = self.ai_client.clone();
+        // warp-cn fork: prefer Direct LLM backend when configured.
+        #[cfg(feature = "direct_llm_backend")]
+        let direct = crate::server::direct_backend::active_backend(ctx);
         let command = self.content_editor.as_ref(ctx).buffer_text(ctx);
         let raw_request = command.trim().to_string();
 
         ctx.spawn(
-            async move { ai_client.generate_metadata_for_command(raw_request).await },
+            async move {
+                #[cfg(feature = "direct_llm_backend")]
+                if let Some(backend) = direct {
+                    return backend.generate_metadata_for_command(raw_request).await;
+                }
+                ai_client.generate_metadata_for_command(raw_request).await
+            },
             move |pane, response, ctx| {
                 match response {
                     Ok(metadata) => {

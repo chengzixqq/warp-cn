@@ -198,8 +198,26 @@ impl AsyncDataSource for WarpAIDataSource {
         let query_text = query.text.clone();
         let ai_execution_context = self.ai_execution_context.clone();
         let ai_client = self.ai_client.clone();
+        // warp-cn fork: prefer Direct LLM backend when configured.
+        #[cfg(feature = "direct_llm_backend")]
+        let direct = crate::server::direct_backend::active_backend(_app);
 
         Box::pin(async move {
+            // warp-cn fork: dispatch to Direct LLM backend if configured.
+            #[cfg(feature = "direct_llm_backend")]
+            let res = match direct {
+                Some(backend) => {
+                    backend
+                        .generate_commands_from_natural_language(query_text)
+                        .await
+                }
+                None => {
+                    ai_client
+                        .generate_commands_from_natural_language(query_text, ai_execution_context)
+                        .await
+                }
+            };
+            #[cfg(not(feature = "direct_llm_backend"))]
             let res = ai_client
                 .generate_commands_from_natural_language(query_text, ai_execution_context)
                 .await;

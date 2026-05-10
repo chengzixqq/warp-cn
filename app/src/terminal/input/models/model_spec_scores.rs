@@ -37,32 +37,38 @@ pub fn render_model_spec_scores(
     layout: ModelSpecScoresLayout,
     app: &AppContext,
 ) -> Box<dyn Element> {
-    let mut rows = vec![render_score_row(
-        "Intelligence",
-        ScoreRowKind::Bar {
-            value: spec.as_ref().map(|spec| spec.quality),
-        },
-        layout.bg_bar_color,
-        app,
-    )];
+    let mut rows = Vec::with_capacity(3);
 
-    rows.push(render_score_row(
-        "Speed",
-        ScoreRowKind::Bar {
-            value: spec.as_ref().map(|spec| spec.speed),
-        },
-        layout.bg_bar_color,
-        app,
-    ));
+    // Intelligence + Speed only render when the catalog actually carries
+    // benchmark data. Third-party providers fetched via Direct LLM mode
+    // (warp-cn fork) ship `spec: None`, so suppress the placeholder "?" bars
+    // entirely rather than implying we have data we don't.
+    if let Some(s) = spec {
+        rows.push(render_score_row(
+            "Intelligence",
+            ScoreRowKind::Bar { value: Some(s.quality) },
+            layout.bg_bar_color,
+            app,
+        ));
+        rows.push(render_score_row(
+            "Speed",
+            ScoreRowKind::Bar { value: Some(s.speed) },
+            layout.bg_bar_color,
+            app,
+        ));
+    }
 
     match cost_row {
         CostRow::Bar { value } => {
-            rows.push(render_score_row(
-                "Cost",
-                ScoreRowKind::Bar { value },
-                layout.bg_bar_color,
-                app,
-            ));
+            // Only show the cost bar when we actually have a numeric estimate.
+            if value.is_some() {
+                rows.push(render_score_row(
+                    "Cost",
+                    ScoreRowKind::Bar { value },
+                    layout.bg_bar_color,
+                    app,
+                ));
+            }
         }
         CostRow::BilledToApi { manage_button } => {
             rows.push(render_score_row(

@@ -175,6 +175,11 @@ impl Requests {
     /// Starts a Warp AI request against the server with the given request prompt.
     pub fn issue_request(&mut self, request: String, ctx: &mut ModelContext<Self>) {
         let server_api = self.server_api.clone();
+        // warp-cn fork: try the user-configured Direct LLM backend first; fall
+        // back to the Warp-cloud GraphQL path if Direct mode is off or no
+        // provider key is configured.
+        #[cfg(feature = "direct_llm_backend")]
+        let direct = crate::server::direct_backend::active_backend(ctx);
         let raw_request = request.trim();
         let request_for_api = raw_request.to_string();
         let transcript = self.current_transcript.clone();
@@ -190,6 +195,13 @@ impl Requests {
         let future_handle = ctx.spawn(
             async move {
                 let start_time = Utc::now();
+                #[cfg(feature = "direct_llm_backend")]
+                if let Some(backend) = direct {
+                    let response = backend
+                        .generate_dialogue_answer(transcript, request_for_api)
+                        .await;
+                    return (start_time, response);
+                }
                 (start_time, server_api
                     .generate_dialogue_answer(transcript, request_for_api, ai_execution_context)
                     .await)

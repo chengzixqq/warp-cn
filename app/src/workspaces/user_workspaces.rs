@@ -487,7 +487,17 @@ impl UserWorkspaces {
     /// Whether BYO API key is enabled for the current user, based on the active policies.
     /// Note that the value may be incorrect if called before the team's billing metadata has been fetched.
     /// For solo users (no workspace), this is controlled by the `SoloUserByok` feature flag.
+    ///
+    /// warp-cn fork: when the `direct_llm_backend` cargo feature is on, this fork's BYO key
+    /// path is the entire point — unconditionally unlock the upstream BYOK paywall so users
+    /// can fill in OpenAI / Anthropic / Google keys via the settings UI without subscribing
+    /// to Warp's Build plan. Upstream behavior is preserved when the feature is off.
     pub fn is_byo_api_key_enabled(&self) -> bool {
+        #[cfg(feature = "direct_llm_backend")]
+        {
+            return true;
+        }
+        #[cfg(not(feature = "direct_llm_backend"))]
         self.current_workspace()
             .map(|workspace| workspace.is_byo_api_key_enabled())
             .unwrap_or(FeatureFlag::SoloUserByok.is_enabled())

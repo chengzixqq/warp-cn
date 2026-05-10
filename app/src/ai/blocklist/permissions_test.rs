@@ -130,6 +130,11 @@ fn test_can_read_files_empty_paths() {
     })
 }
 
+// warp-cn fork: under `direct_llm_backend` we coerce AlwaysAsk for
+// the read_files / mcp / write / pty gates the same way we do for
+// execute_commands. The upstream assertions expecting AlwaysAsk to
+// deny no longer hold; skip under the fork feature.
+#[cfg_attr(feature = "direct_llm_backend", ignore = "see fork-specific coercion")]
 #[test]
 fn test_can_read_files_workspace_settings_override_profile() {
     App::test((), |mut app| async move {
@@ -196,6 +201,7 @@ fn test_can_read_files_workspace_settings_override_profile() {
     })
 }
 
+#[cfg_attr(feature = "direct_llm_backend", ignore = "see fork-specific coercion")]
 #[test]
 fn test_can_read_files_profile_workspace_allowlist_interaction() {
     App::test((), |mut app| async move {
@@ -332,6 +338,7 @@ fn test_can_read_files_profile_workspace_allowlist_interaction() {
     })
 }
 
+#[cfg_attr(feature = "direct_llm_backend", ignore = "see fork-specific coercion")]
 #[test]
 fn test_can_write_files() {
     App::test((), |mut app| async move {
@@ -404,6 +411,7 @@ fn test_can_write_files() {
     })
 }
 
+#[cfg_attr(feature = "direct_llm_backend", ignore = "see fork-specific coercion")]
 #[test]
 fn test_can_write_files_workspace_settings_override_profile() {
     App::test((), |mut app| async move {
@@ -510,6 +518,12 @@ fn test_can_write_files_mcp_config_always_denied() {
     })
 }
 
+// warp-cn fork: under `direct_llm_backend` we coerce AlwaysAsk →
+// AgentDecides for command execution, so the upstream assertion that
+// AlwaysAsk denies non-allowlisted commands no longer holds for that
+// build. Skip the test when the feature is on; the same scenario is
+// covered by `test_direct_backend_coerces_always_ask_to_agent_decides`.
+#[cfg_attr(feature = "direct_llm_backend", ignore = "see fork-specific coercion test")]
 #[test]
 fn test_can_autoexecute_command_workspace_settings_override_profile() {
     App::test((), |mut app| async move {
@@ -681,6 +695,9 @@ fn test_can_autoexecute_command_denylist_precedence() {
     })
 }
 
+// warp-cn fork: same skip rationale as
+// `test_can_autoexecute_command_workspace_settings_override_profile`.
+#[cfg_attr(feature = "direct_llm_backend", ignore = "see fork-specific coercion test")]
 #[test]
 fn test_can_autoexecute_command_allowlist_precedence() {
     App::test((), |mut app| async move {
@@ -868,6 +885,7 @@ fn test_can_autoexecute_command_run_to_completion_allows_non_denylisted() {
     })
 }
 
+#[cfg_attr(feature = "direct_llm_backend", ignore = "see fork-specific coercion")]
 #[test]
 fn test_can_write_to_pty() {
     App::test((), |mut app| async move {
@@ -1525,6 +1543,172 @@ fn test_denylist_matches_multiline_commands() {
                     CommandExecutionPermissionDeniedReason::ExplicitlyDenylisted
                 )
             ));
+        });
+    })
+}
+
+/// warp-cn fork: reproduces the v4-flash batch from the direct_llm_backend
+/// `/plan` session — every command was correctly classified `read_only`
+/// by the model but a subset still got ⊘ in the UI. Pinning the exact
+/// command strings + the exact `(is_read_only=true, is_risky=None)` mapping
+/// our adapter emits, against the *unmodified* default profile, lets us
+/// regression-test the gate without restarting the bundle each time.
+#[cfg(feature = "direct_llm_backend")]
+#[test]
+fn test_direct_backend_v4_flash_read_only_batch_under_default_profile() {
+    App::test((), |mut app| async move {
+        let PermissionsTestState {
+            convo_id,
+            permissions,
+            terminal_view_id,
+            ..
+        } = initialize_permissions_test(&mut app);
+
+        // Real `cd <abs> && <cmd>` strings v4-flash emitted, sampled from
+        // both the ✓ and the ⊘ buckets in the user's screenshot trio.
+        let cmds = [
+            // Plain — these should always pass on `is_read_only=true`.
+            "cd /Users/liji/warp && ls -la",
+            "cd /Users/liji/warp && ls app/src/",
+            "cd /Users/liji/warp && git log --oneline -15",
+            "cd /Users/liji/warp && cat rust-toolchain.toml",
+            "cd /Users/liji/warp && wc -l Cargo.toml",
+            // Pipe — no redirection, just `|`.
+            "cd /Users/liji/warp && ls crates/ | sort",
+            "cd /Users/liji/warp && ls crates/ | wc -l && ls crates/ | sort",
+            // /dev/null silenced stderr — covered by the
+            // `only_dev_null_redirections` carve-out in permissions.rs.
+            "cd /Users/liji/warp && cat app/src/features.rs 2>/dev/null | head -80",
+            "cd /Users/liji/warp && ls -la docs/ 2>/dev/null; ls scripts/ 2>/dev/null",
+            "cd /Users/liji/warp && git remote -v 2>/dev/null",
+            r#"cd /Users/liji/warp && cat rust-toolchain.toml 2>/dev/null || echo "not found""#,
+        ];
+
+        permissions.read(&app, |model, ctx| {
+            for cmd in cmds {
+                let result = model.can_autoexecute_command(
+                    &convo_id,
+                    cmd,
+                    EscapeChar::Backslash,
+                    /* is_read_only = */ true,
+                    /* is_risky    = */ None, // matches our adapter's mapping
+                    Some(terminal_view_id),
+                    ctx,
+                );
+                assert!(
+                    result.is_allowed(),
+                    "expected ALLOW for read-only cmd `{cmd}`, got {result:?}",
+                );
+            }
+        });
+    })
+}
+
+/// warp-cn fork: pin the exact ⊘ batch from screenshot #31 (v4-flash
+/// session timestamp 11:46:34Z). All 7 commands are read_only with
+/// pipes / `2>/dev/null` / `$()` substitutions and were rejected by
+/// the runtime client. If this test PASSES, the gating code is
+/// correct and the runtime ⊘ comes from a state outside the gate
+/// (workspace override, conversation autoexecute_override flip,
+/// stale profile cache). If it FAILS, we have an actual logic bug
+/// in `decompose_command` / `only_dev_null_redirections` /
+/// `contains_redirection` reporting and need to fix it here.
+#[cfg(feature = "direct_llm_backend")]
+#[test]
+fn test_direct_backend_screenshot31_pipe_and_dev_null_batch() {
+    App::test((), |mut app| async move {
+        let PermissionsTestState {
+            convo_id,
+            permissions,
+            terminal_view_id,
+            ..
+        } = initialize_permissions_test(&mut app);
+
+        let cmds = [
+            // Plain pipes, NO redirection.
+            "find . -name \"*.rs\" -not -path \"*/target/*\" -not -path \"*/node_modules/*\" | wc -l",
+            "ls -la app/src/ai/ | head -30",
+            // Single command + 2>/dev/null silenced stderr.
+            "git log --oneline -20 2>/dev/null",
+            "git rev-list --count HEAD 2>/dev/null",
+            // 2>/dev/null + ; separator + pipe.
+            "cat specs/specs_list.txt 2>/dev/null; ls specs/ | wc -l",
+            // $() substitution + 2>/dev/null inside + 2>/dev/null outside + pipe.
+            r#"wc -l $(find . -name "Cargo.toml" -not -path "*/target/*" -not -path "*/node_modules/*") 2>/dev/null | tail -5"#,
+            // $() with -not -path globs (the in-progress yellow one from screenshot).
+            r#"wc -l $(find . -name "*.rs" -path "*/src/*" -not -path "*/target/*" -not -path "*/node_modules/*" -not -path "*/venv/*" 2>/dev/null) | tail -5"#,
+        ];
+
+        permissions.read(&app, |model, ctx| {
+            let mut failures = Vec::new();
+            for cmd in cmds {
+                let result = model.can_autoexecute_command(
+                    &convo_id,
+                    cmd,
+                    EscapeChar::Backslash,
+                    /* is_read_only = */ true,
+                    /* is_risky    = */ None,
+                    Some(terminal_view_id),
+                    ctx,
+                );
+                if !result.is_allowed() {
+                    failures.push(format!("{cmd:?} → {result:?}"));
+                }
+            }
+            assert!(
+                failures.is_empty(),
+                "expected ALLOW for every screenshot-#31 command but got:\n{}",
+                failures.join("\n"),
+            );
+        });
+    })
+}
+
+/// warp-cn fork: even when an upstream-style `AlwaysAsk` setting is
+/// persisted (saved profile / workspace override), `direct_llm_backend`
+/// must coerce it to `AgentDecides` so the user's own-LLM agent loop
+/// isn't trapped on every read-only inspection. Without the coercion,
+/// the v4-flash session reproduces the exact ⊘ pattern from the
+/// screenshot trio: identical commands flip pass→deny across turns
+/// because nothing in the agent path can satisfy the popup.
+#[cfg(feature = "direct_llm_backend")]
+#[test]
+fn test_direct_backend_coerces_always_ask_to_agent_decides() {
+    App::test((), |mut app| async move {
+        let PermissionsTestState {
+            convo_id,
+            permissions,
+            user_workspaces,
+            terminal_view_id,
+            ..
+        } = initialize_permissions_test(&mut app);
+
+        // Simulate the offending state: workspace forces AlwaysAsk.
+        user_workspaces.update(&mut app, |model, ctx| {
+            model.setup_test_workspace(ctx);
+            model.update_ai_autonomy_settings(
+                |settings| {
+                    settings.execute_commands_setting = Some(ActionPermission::AlwaysAsk);
+                },
+                ctx,
+            );
+        });
+
+        permissions.read(&app, |model, ctx| {
+            let result = model.can_autoexecute_command(
+                &convo_id,
+                "cd /Users/liji/warp && ls app/src/",
+                EscapeChar::Backslash,
+                /* is_read_only = */ true,
+                /* is_risky    = */ None,
+                Some(terminal_view_id),
+                ctx,
+            );
+            assert!(
+                result.is_allowed(),
+                "with direct_llm_backend, AlwaysAsk should be coerced to \
+                 AgentDecides for read-only commands; got {result:?}",
+            );
         });
     })
 }

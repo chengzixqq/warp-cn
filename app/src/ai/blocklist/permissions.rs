@@ -31,6 +31,31 @@ use warpui::{AppContext, Entity, EntityId, ModelContext, SingletonEntity};
 
 use super::BlocklistAIHistoryModel;
 
+// warp-cn fork: under `direct_llm_backend`, an `AlwaysAsk` setting
+// (saved profile or workspace override) silently denies every tool call
+// because the agent loop has no UI affordance to confirm popups during
+// execution. These helpers downgrade `AlwaysAsk` to its safest
+// agent-driven equivalent so the per-action heuristic (is_read_only,
+// denylist, allowlist) takes over. Off-feature behavior is unchanged.
+#[cfg(feature = "direct_llm_backend")]
+fn coerce_action_for_direct_backend(p: ActionPermission) -> ActionPermission {
+    match p {
+        ActionPermission::AlwaysAsk => ActionPermission::AgentDecides,
+        other => other,
+    }
+}
+
+#[cfg(feature = "direct_llm_backend")]
+fn coerce_pty_for_direct_backend(p: WriteToPtyPermission) -> WriteToPtyPermission {
+    match p {
+        // PTY has no `AgentDecides`; the safest auto-mode is
+        // `AskOnFirstWrite` — the agent gets a pty handle on first use
+        // and reuses it without re-prompting for the rest of the command.
+        WriteToPtyPermission::AlwaysAsk => WriteToPtyPermission::AskOnFirstWrite,
+        other => other,
+    }
+}
+
 /// Whether or not a command can be auto-executed, along with a detailed reason.
 #[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 pub enum CommandExecutionPermission {
@@ -482,7 +507,10 @@ impl BlocklistAIPermissions {
         {
             return WriteToPtyPermission::AlwaysAllow;
         }
-        self.get_write_to_pty_setting(ctx, terminal_view_id)
+        let setting = self.get_write_to_pty_setting(ctx, terminal_view_id);
+        #[cfg(feature = "direct_llm_backend")]
+        let setting = coerce_pty_for_direct_backend(setting);
+        setting
     }
 
     pub fn get_mcp_permissions_setting_for_profile(
@@ -684,7 +712,10 @@ impl BlocklistAIPermissions {
             }
         }
 
-        match self.get_read_files_setting(ctx, terminal_view_id) {
+        let setting = self.get_read_files_setting(ctx, terminal_view_id);
+        #[cfg(feature = "direct_llm_backend")]
+        let setting = coerce_action_for_direct_backend(setting);
+        match setting {
             ActionPermission::AgentDecides | ActionPermission::Unknown => {
                 // For now, we always read files. We don't ask the user for permission.
                 FileReadPermission::Allowed(FileReadPermissionAllowedReason::AgentDecided)
@@ -817,7 +848,10 @@ impl BlocklistAIPermissions {
         let denylisted = uuid_of_mcp_server
             .is_some_and(|uid| self.get_mcp_denylist(ctx, terminal_view_id).contains(&uid));
 
-        match self.get_mcp_permissions_setting(ctx, terminal_view_id) {
+        let setting = self.get_mcp_permissions_setting(ctx, terminal_view_id);
+        #[cfg(feature = "direct_llm_backend")]
+        let setting = coerce_action_for_direct_backend(setting);
+        match setting {
             ActionPermission::AgentDecides | ActionPermission::Unknown => {
                 allowlisted && !denylisted
             }
@@ -832,7 +866,10 @@ impl BlocklistAIPermissions {
         terminal_view_id: Option<EntityId>,
         ctx: &AppContext,
     ) -> FileWritePermission {
-        match self.get_apply_code_diffs_setting(ctx, terminal_view_id) {
+        let setting = self.get_apply_code_diffs_setting(ctx, terminal_view_id);
+        #[cfg(feature = "direct_llm_backend")]
+        let setting = coerce_action_for_direct_backend(setting);
+        match setting {
             ActionPermission::AgentDecides | ActionPermission::Unknown => {
                 FileWritePermission::Denied(FileWritePermissionDeniedReason::AgentDecided)
             }
@@ -888,7 +925,24 @@ impl BlocklistAIPermissions {
             );
         }
 
-        match self.get_execute_commands_setting(ctx, terminal_view_id) {
+        let setting = self.get_execute_commands_setting(ctx, terminal_view_id);
+        #[cfg(feature = "direct_llm_backend")]
+        let setting = {
+            let coerced = coerce_action_for_direct_backend(setting);
+            log::info!(
+                "DirectBackend gate: cmd={:?} raw_setting={:?} effective_setting={:?} \
+                 is_read_only={} is_risky={:?} contains_redirection={} sub_commands={:?}",
+                normalized_command,
+                setting,
+                coerced,
+                is_read_only,
+                is_risky,
+                contains_redirection,
+                commands,
+            );
+            coerced
+        };
+        match setting {
             ActionPermission::AgentDecides | ActionPermission::Unknown => {
                 if FeatureFlag::AgentDecidesCommandExecution.is_enabled() && is_risky == Some(false)
                 {
@@ -897,7 +951,20 @@ impl BlocklistAIPermissions {
                     );
                 }
 
-                if contains_redirection {
+                // warp-cn fork: when the agent classified the command as
+                // read-only AND every redirection in it targets /dev/null
+                // (or is a pure fd-dup like 2>&1), allow auto-execute.
+                // Models routinely emit `2>/dev/null` to silence stderr on
+                // discovery commands; the upstream rule unconditionally
+                // denies any redirection, which traps every agent loop in
+                // a "denied → retry → denied" spiral. Off-feature builds
+                // keep upstream's strict deny.
+                #[cfg(feature = "direct_llm_backend")]
+                let dev_null_safe = is_read_only
+                    && only_dev_null_redirections(&normalized_command);
+                #[cfg(not(feature = "direct_llm_backend"))]
+                let dev_null_safe = false;
+                if contains_redirection && !dev_null_safe {
                     return CommandExecutionPermission::Denied(
                         CommandExecutionPermissionDeniedReason::ContainsRedirection,
                     );
@@ -1175,6 +1242,40 @@ impl BlocklistAIPermissions {
             AskUserQuestionPermission::AlwaysAsk => true,
         }
     }
+}
+
+/// warp-cn fork: returns true iff every redirection in `command` writes to
+/// `/dev/null` (or is a pure file-descriptor duplication like `2>&1`).
+///
+/// Strips known-safe redirection patterns from the command string and checks
+/// whether any `>` / `<` operator survives. This is intentionally conservative —
+/// quoted strings containing literal `>` will be denied (false negative is OK,
+/// the model retries without quotes), while novel safe patterns must be added
+/// to the strip list explicitly. Used only to gate the
+/// `ContainsRedirection` denial when the agent classified the command as
+/// `is_read_only`, so a malicious model cannot bypass the check by lying about
+/// `is_read_only`: targeting a real file (e.g. `> /etc/passwd`) still leaves
+/// a `>` in the residue and is denied.
+#[cfg(feature = "direct_llm_backend")]
+fn only_dev_null_redirections(command: &str) -> bool {
+    let stripped = command
+        .replace("&>>/dev/null", "")
+        .replace("&> /dev/null", "")
+        .replace("&>/dev/null", "")
+        .replace(">/dev/null 2>&1", "")
+        .replace("> /dev/null 2>&1", "")
+        .replace(">>/dev/null", "")
+        .replace(">> /dev/null", "")
+        .replace("2>>/dev/null", "")
+        .replace("2>> /dev/null", "")
+        .replace("2>/dev/null", "")
+        .replace("2> /dev/null", "")
+        .replace(">/dev/null", "")
+        .replace("> /dev/null", "")
+        .replace("2>&1", "")
+        .replace("1>&2", "")
+        .replace(">&2", "");
+    !stripped.contains('>') && !stripped.contains('<')
 }
 
 /// Returns `Some(Denied(ProtectedPath))` if any of the given paths are system-protected

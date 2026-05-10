@@ -95,11 +95,20 @@ impl WorkflowModal {
     /// Send request to generate metadata for the command in command editor.
     pub(super) fn issue_request(&mut self, ctx: &mut ViewContext<Self>) {
         let ai_client = self.ai_client.clone();
+        // warp-cn fork: prefer Direct LLM backend when configured.
+        #[cfg(feature = "direct_llm_backend")]
+        let direct = crate::server::direct_backend::active_backend(ctx);
         let content = self.content_editor.as_ref(ctx).buffer_text(ctx);
         let raw_request = content.trim().to_string();
 
         ctx.spawn(
-            async move { ai_client.generate_metadata_for_command(raw_request).await },
+            async move {
+                #[cfg(feature = "direct_llm_backend")]
+                if let Some(backend) = direct {
+                    return backend.generate_metadata_for_command(raw_request).await;
+                }
+                ai_client.generate_metadata_for_command(raw_request).await
+            },
             move |modal, response, ctx| {
                 match response {
                     Ok(metadata) => {

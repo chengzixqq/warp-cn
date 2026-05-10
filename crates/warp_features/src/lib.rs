@@ -866,6 +866,14 @@ pub enum FeatureFlag {
     /// conversation into a fresh cloud agent run with the current workspace
     /// snapshot attached. Requires `OzHandoff` to also be enabled.
     HandoffLocalCloud,
+
+    /// warp-cn fork: route all AI traffic (chat, command suggestion, multi-agent
+    /// stream) through a user-configured LLM provider (OpenAI / Anthropic /
+    /// Gemini / OpenAI-compatible gateway) instead of Warp cloud. When enabled,
+    /// the client bypasses `/ai/*` and `/graphql/v2` AI endpoints and the
+    /// server-side Warp Credits / quota system; user-supplied API keys + base
+    /// URL + model id are read from `ApiKeyManager` and per-provider settings.
+    DirectLlmBackend,
 }
 
 static FLAG_STATES: [AtomicBool; cardinality::<FeatureFlag>()] =
@@ -977,6 +985,17 @@ pub const RELEASE_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::AgentToolbarEditor,
     // warp-cn fork: route codebase indexing through local Auggie MCP for accountless usage.
     FeatureFlag::AuggieCodebaseIndex,
+    // warp-cn fork: send AI traffic to user-configured providers (OpenAI / Anthropic /
+    // Gemini / compatible gateways) and bypass Warp cloud + quota. Pairs with the
+    // `direct_llm_backend` cargo feature, which also pulls in `skip_login`.
+    FeatureFlag::DirectLlmBackend,
+    // warp-cn fork: enable BYO API keys for solo (non-team) users so the BYOK
+    // settings UI and `is_byo_api_key_enabled()` gate accept user-provided keys.
+    FeatureFlag::SoloUserByok,
+    // warp-cn fork: surface computer-use tools to the agent and allow the local
+    // client (not just cloud agents) to execute them via `crates/computer_use`.
+    FeatureFlag::AgentModeComputerUse,
+    FeatureFlag::LocalComputerUse,
 ];
 
 /// Flags that we want to allow to switch at runtime (assuming RuntimeFeatureFlags is set)

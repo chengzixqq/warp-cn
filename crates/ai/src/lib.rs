@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod api_keys;
 pub mod aws_credentials;
+pub mod direct_backend;
 pub mod llm_id;
 
 pub use llm_id::LLMId;

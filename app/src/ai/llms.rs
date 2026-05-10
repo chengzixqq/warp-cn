@@ -946,10 +946,49 @@ impl LLMPreferences {
     }
 
     pub fn refresh_available_models(&self, ctx: &mut ModelContext<Self>) {
-        if AuthStateProvider::as_ref(ctx).get().is_logged_in() {
-            self.refresh_authed_models(ctx);
-        } else {
-            self.refresh_public_models(ctx);
+        // warp-cn fork: if a Direct LLM provider is configured, fetch its
+        // model list directly from the provider's `/v1/models` (or equivalent)
+        // endpoint and bypass the upstream Warp catalog entirely. Falls back
+        // to the original auth/public path on configuration miss or fetch error.
+        #[cfg(feature = "direct_llm_backend")]
+        {
+            ctx.spawn(
+                async move { crate::server::direct_backend::model_catalog::fetch_dynamic_catalog().await },
+                |me, opt, ctx| match opt {
+                    Some(Ok(update)) => {
+                        if update != me.models_by_feature {
+                            me.on_server_update(update, ctx);
+                        }
+                    }
+                    Some(Err(e)) => {
+                        log::warn!(
+                            "DirectBackend: dynamic catalog fetch failed, falling back to upstream: {e:#}"
+                        );
+                        if AuthStateProvider::as_ref(ctx).get().is_logged_in() {
+                            me.refresh_authed_models(ctx);
+                        } else {
+                            me.refresh_public_models(ctx);
+                        }
+                    }
+                    None => {
+                        // No direct provider configured — fall through to upstream.
+                        if AuthStateProvider::as_ref(ctx).get().is_logged_in() {
+                            me.refresh_authed_models(ctx);
+                        } else {
+                            me.refresh_public_models(ctx);
+                        }
+                    }
+                },
+            );
+            return;
+        }
+        #[cfg(not(feature = "direct_llm_backend"))]
+        {
+            if AuthStateProvider::as_ref(ctx).get().is_logged_in() {
+                self.refresh_authed_models(ctx);
+            } else {
+                self.refresh_public_models(ctx);
+            }
         }
     }
 

@@ -264,6 +264,16 @@ impl Default for AIExecutionProfile {
             is_default_profile: false,
             apply_code_diffs: ActionPermission::AgentDecides,
             read_files: ActionPermission::AgentDecides,
+            // warp-cn fork: when the user is driving their own LLM via
+            // `direct_llm_backend`, the upstream default `AlwaysAsk` traps
+            // every read-only inspection (`ls`, `git log`, `cat`) in a
+            // permission popup the model never sees, so the agent loop
+            // self-terminates after a few denial rounds. Drop to
+            // `AgentDecides` so `is_read_only=true` calls auto-execute and
+            // mutating ones still ask. Off-feature behavior is unchanged.
+            #[cfg(feature = "direct_llm_backend")]
+            execute_commands: ActionPermission::AgentDecides,
+            #[cfg(not(feature = "direct_llm_backend"))]
             execute_commands: ActionPermission::AlwaysAsk,
             write_to_pty: WriteToPtyPermission::AlwaysAsk,
             mcp_permissions: ActionPermission::AgentDecides,

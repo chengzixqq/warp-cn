@@ -1,6 +1,11 @@
 pub mod block;
 pub mod cloud_objects;
 pub mod datetime_ext;
+// warp-cn fork: route AI traffic to user-configured providers when the cargo
+// feature is on. Lives next to `server_api` so the early-return hooks have a
+// short, stable import path.
+#[cfg(feature = "direct_llm_backend")]
+pub mod direct_backend;
 pub mod experiments;
 pub mod graphql;
 pub mod ids;

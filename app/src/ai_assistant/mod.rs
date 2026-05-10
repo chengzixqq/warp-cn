@@ -87,9 +87,32 @@ pub struct AIGeneratedCommand {
     parameters: Vec<AIGeneratedCommandParameter>,
 }
 
+impl AIGeneratedCommand {
+    /// warp-cn fork: lets the Direct LLM backend construct results without
+    /// going through the cynic-derived `GeneratedCommand` GraphQL fragment.
+    pub fn new(
+        command: String,
+        description: String,
+        parameters: Vec<AIGeneratedCommandParameter>,
+    ) -> Self {
+        Self {
+            command,
+            description,
+            parameters,
+        }
+    }
+}
+
 pub struct AIGeneratedCommandParameter {
     id: String,
     description: String,
+}
+
+impl AIGeneratedCommandParameter {
+    /// warp-cn fork: parallels [`AIGeneratedCommand::new`].
+    pub fn new(id: String, description: String) -> Self {
+        Self { id, description }
+    }
 }
 
 impl From<AIGeneratedCommand> for Workflow {

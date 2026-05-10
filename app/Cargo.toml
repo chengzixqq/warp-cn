@@ -635,6 +635,7 @@ default = [
     "settings_file",
     "directory_tab_colors",
     "auggie_codebase_index",
+    "direct_llm_backend",
 ]
 # Enable this feature to automatically perform heap profiling.  NOTE: This will
 # substantially slow down program execution.
@@ -765,6 +766,18 @@ sequential_storage = []
 session_sharing = []
 session_sharing_acls = []
 skip_login = []
+# warp-cn fork: route AI traffic to user-configured LLM providers (OpenAI /
+# Anthropic / Gemini / OpenAI-compatible gateways) and bypass Warp cloud auth.
+# Implies `skip_login` (so the app starts without forcing a login flow), and
+# `local_computer_use` + `agent_mode_computer_use` (so Claude can drive the
+# desktop in fully-offline mode). The runtime FeatureFlag::DirectLlmBackend is
+# what gates request routing at the call sites; this cargo feature only
+# controls compile-time inclusion of the bypass paths.
+direct_llm_backend = [
+    "skip_login",
+    "local_computer_use",
+    "agent_mode_computer_use",
+]
 # This feature should only be enabled when building a self-contained binary with the bundle script.
 standalone = []
 prompt_suggestions_via_maa = []
