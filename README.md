@@ -110,3 +110,57 @@ We'd like to call out a few of the [open source dependencies](https://docs.warp.
 * [FontKit](https://github.com/servo/font-kit)
 * [Core-foundation](https://github.com/servo/core-foundation-rs)
 * [Smol](https://github.com/smol-rs/smol)
+
+---
+
+## warp-cn fork additions
+
+This repository is the [warp-cn community fork](https://github.com/Heartcoolman/warp-cn). Fork-only additions sit behind `#[cfg(feature = "direct_llm_backend")]` or in fork-only paths, so upstream-feature-off builds are unaffected. See [`README_zh.md`](./README_zh.md) for the full Chinese write-up.
+
+### Direct LLM Backend (BYOK) — initial preview
+
+> ⚠️ **Initial release (v0.1).** Core paths work end-to-end (project evaluation, file reads, shell, MCP), but tool-result race conditions and a few rough edges are still being smoothed out. Please file issues in the fork repo.
+
+Lets users point Warp at **their own LLM API key** (Anthropic / OpenAI-compatible incl. DeepSeek / Google Gemini) and run the full agent loop **without ever talking to Warp Cloud**. Landed via merge `84f9ef23` on `master` (9 commits squashed under `feat/direct-llm-backend`).
+
+**Supported providers**
+
+| Provider | Default base URL | Notes |
+|---|---|---|
+| Anthropic | `https://api.anthropic.com/v1` | Native SSE |
+| OpenAI-compatible | `https://api.openai.com/v1` | Works with DeepSeek (`https://api.deepseek.com/v1`) and any `/v1/chat/completions` endpoint |
+| Google Gemini | `https://generativelanguage.googleapis.com/v1beta` | `?alt=sse` streaming |
+
+Each provider keeps its own base URL + key + default model; the model dropdown is populated dynamically from the provider's `/v1/models` endpoint.
+
+**Enabling**
+
+1. **Settings → AI → API Keys** has a new "Direct backend" section — fill in any provider's key, URL, and default model.
+2. **Settings → General** switch the active provider (one-time restart on first switch).
+3. From then on, Agent Mode talks to your own API key directly. **No Warp account login required.**
+
+**Tool set (11)**
+
+`read_files` · `run_shell_command` · `grep` · `file_glob` · `apply_file_diffs` · `ask_user_question` · `write_to_long_running_shell_command` · `read_shell_command_output` · `transfer_shell_command_control_to_user` · `read_mcp_resource` · `call_mcp_tool`
+
+MCP runs client-side and reuses the local `~/.warp/.mcp.json`; no MCP server-side re-wiring needed.
+
+**Known limitations**
+
+- **Reasoning models**: DeepSeek-R1 / o1-style `reasoning_content` echo-back is supported; other reasoning models surface as errors if rejected.
+- **Tool-result race**: client occasionally fires the next request before all parallel tool results return; the server stubs missing IDs with a transient-retry hint to keep the model from hallucinating. Look for `DirectBackend OpenAI: stubbed N missing` in `~/Library/Logs/warp-oss.log`.
+- **Computer Use / Drive / Workflow agents** and other Warp-cloud-only auxiliaries return empty in direct mode (does not affect the main chat loop).
+- **Cost / token accounting**: only input / output tokens are reported in `StreamFinished.token_usage`; cost is not computed.
+
+**Security / permissions**
+
+- Four permission gates (`read_files`, `mcp`, `file_write`, `pty`, `execute_commands`) coerce upstream `AlwaysAsk` to `AgentDecides` (or `AskOnFirstWrite` for PTY) when the feature is on, so own-LLM read-only inspection isn't trapped by a popup the model can never satisfy.
+- All fork behavior is gated by `#[cfg(feature = "direct_llm_backend")]`; upstream-feature-off builds are unchanged.
+- API keys are persisted to `~/Library/Application Support/dev.warp.WarpCn/` as AES-256-GCM encrypted files (no macOS Keychain).
+
+**Source layout**
+
+- Entry: `app/src/server/direct_backend/`
+- Config schema: `crates/ai/src/direct_backend/config.rs`
+- Multi-provider drivers / SSE: `app/src/server/direct_backend/multi_agent/`
+- Cargo feature: `app/Cargo.toml` → `direct_llm_backend = [...]` (on by default in fork builds)
