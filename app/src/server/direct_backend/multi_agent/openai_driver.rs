@@ -90,6 +90,10 @@ pub async fn call_streaming(
         .bearer_auth(&provider.api_key)
         .header("accept", "text/event-stream")
         .json(&body);
+    log::info!(
+        "DirectBackend OpenAI: opening SSE url={} model={} messages={} tools={}",
+        url, provider.model_id, body.messages.len(), body.tools.len(),
+    );
     let event_source = req.eventsource().context("OpenAI SSE init")?;
 
     let model_id = provider.model_id.clone();
@@ -102,6 +106,8 @@ pub async fn call_streaming(
         output_tokens: None,
         stop_reason: None,
         model_id,
+        chunk_count: 0,
+        first_chunk_logged: false,
     };
     let s = futures::stream::unfold(state, |mut st| async move {
         if st.finished {
@@ -114,6 +120,10 @@ pub async fn call_streaming(
             }
             match st.es.next().await {
                 None => {
+                    log::info!(
+                        "DirectBackend OpenAI: SSE closed gracefully after {} chunks (stop_reason={:?})",
+                        st.chunk_count, st.stop_reason,
+                    );
                     drain_and_finish(&mut st);
                     if let Some(first) = st.pending_tools.pop_front() {
                         return Some((Ok(first), st));
@@ -129,10 +139,22 @@ pub async fn call_streaming(
                         return None;
                     }
                     st.finished = true;
-                    return Some((Err(anyhow!("OpenAI SSE: {e}")), st));
+                    let detail = describe_sse_error(e).await;
+                    return Some((Err(anyhow!("OpenAI SSE: {detail}")), st));
                 }
-                Some(Ok(SseEvent::Open)) => continue,
+                Some(Ok(SseEvent::Open)) => {
+                    log::info!("DirectBackend OpenAI: SSE Open event received");
+                    continue;
+                }
                 Some(Ok(SseEvent::Message(m))) => {
+                    if !st.first_chunk_logged {
+                        st.first_chunk_logged = true;
+                        log::info!(
+                            "DirectBackend OpenAI: first SSE chunk received (data_len={})",
+                            m.data.len(),
+                        );
+                    }
+                    st.chunk_count += 1;
                     if m.data.trim() == "[DONE]" {
                         // Drain any half-buffered tool calls before closing —
                         // some gateways send [DONE] before a per-choice
@@ -187,6 +209,8 @@ struct StreamState {
     output_tokens: Option<u32>,
     stop_reason: Option<String>,
     model_id: String,
+    chunk_count: u32,
+    first_chunk_logged: bool,
 }
 
 /// Drain any half-buffered tool calls into `pending_tools` and append the
@@ -230,6 +254,31 @@ fn drain_and_finish(st: &mut StreamState) {
     st.finished = true;
 }
 
+/// Surface the gateway's response body for `400/401/4xx/5xx`. Without this
+/// the user only sees `Invalid status code: 400 Bad Request`, which masks
+/// useful provider feedback like "model X does not support tools" or
+/// "stream_options not allowed". Body is truncated to 500 chars to keep the
+/// in-app error block readable.
+async fn describe_sse_error(e: reqwest_eventsource::Error) -> String {
+    match e {
+        reqwest_eventsource::Error::InvalidStatusCode(code, resp) => {
+            let body = resp.text().await.unwrap_or_default();
+            let truncated: String = body.chars().take(500).collect();
+            if truncated.is_empty() {
+                format!("HTTP {code}")
+            } else {
+                format!("HTTP {code}: {truncated}")
+            }
+        }
+        reqwest_eventsource::Error::InvalidContentType(ct, resp) => {
+            let body = resp.text().await.unwrap_or_default();
+            let truncated: String = body.chars().take(500).collect();
+            format!("invalid content-type {ct:?}: {truncated}")
+        }
+        other => format!("{other}"),
+    }
+}
+
 #[derive(Deserialize)]
 struct OpenAiChunk {
     #[serde(default)]
@@ -250,6 +299,11 @@ struct ChunkChoice {
 struct ChunkDelta {
     #[serde(default)]
     content: Option<String>,
+    /// DeepSeek-R1 / o1-style reasoning models emit chain-of-thought tokens
+    /// here instead of `content`. Without this field the entire reply would
+    /// be silently dropped because every chunk's `content` is `null`.
+    #[serde(default)]
+    reasoning_content: Option<String>,
     #[serde(default)]
     tool_calls: Vec<DeltaToolCall>,
 }
@@ -294,6 +348,14 @@ fn parse_openai_chunk(data: &str, st: &mut StreamState) -> Vec<DriverStreamChunk
             if !text.is_empty() {
                 // OpenAI never emits parallel text streams: block_idx = 0.
                 out.push(DriverStreamChunk::TextDelta {
+                    block_idx: 0,
+                    text,
+                });
+            }
+        }
+        if let Some(text) = choice.delta.reasoning_content {
+            if !text.is_empty() {
+                out.push(DriverStreamChunk::ReasoningDelta {
                     block_idx: 0,
                     text,
                 });
@@ -369,6 +431,77 @@ fn parse_openai_chunk(data: &str, st: &mut StreamState) -> Vec<DriverStreamChunk
     out
 }
 
+/// Walks the projected message array and ensures every assistant message's
+/// `tool_calls[*].id` has a matching `tool` message after it. Missing IDs get
+/// a stub so DeepSeek/OpenAI's strict pairing check (HTTP 400 "insufficient
+/// tool messages following tool_calls message") doesn't blow up the whole
+/// turn.
+///
+/// The stub is phrased as a *transient* error so the model retries the call
+/// in the next turn instead of treating it as a permanent failure and
+/// hallucinating around it. (Earlier "[result unavailable]" wording made
+/// v4-flash apologize and stop using the tool.)
+fn ensure_tool_results_complete(messages: &mut Vec<Value>) {
+    let mut i = 0;
+    let mut total_stubs = 0usize;
+    let mut total_assistant_with_tools = 0usize;
+    while i < messages.len() {
+        let needed_ids: Vec<String> = messages[i]
+            .get("tool_calls")
+            .and_then(|tc| tc.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|c| c.get("id").and_then(|id| id.as_str()).map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if needed_ids.is_empty() {
+            i += 1;
+            continue;
+        }
+        total_assistant_with_tools += 1;
+        // Scan the contiguous run of `tool` messages immediately following.
+        let mut j = i + 1;
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        while j < messages.len() {
+            let role = messages[j].get("role").and_then(|r| r.as_str()).unwrap_or("");
+            if role != "tool" {
+                break;
+            }
+            if let Some(id) = messages[j].get("tool_call_id").and_then(|v| v.as_str()) {
+                seen.insert(id.to_owned());
+            }
+            j += 1;
+        }
+        let missing: Vec<&String> = needed_ids.iter().filter(|id| !seen.contains(*id)).collect();
+        if !missing.is_empty() {
+            log::warn!(
+                "DirectBackend OpenAI: assistant turn at idx {i} has {needed} tool_calls but only {seen} results returned; stubbing {n} missing id(s): {ids:?}",
+                needed = needed_ids.len(),
+                seen = seen.len(),
+                n = missing.len(),
+                ids = missing,
+            );
+        }
+        for id in &missing {
+            let stub = json!({
+                "role": "tool",
+                "tool_call_id": id,
+                "content": "[client did not return a result for this tool call before the next turn was sent — please re-invoke the same tool with identical arguments to retry; do NOT apologize or substitute a fabricated answer]",
+            });
+            messages.insert(j, stub);
+            j += 1;
+            total_stubs += 1;
+        }
+        i = j;
+    }
+    if total_stubs > 0 {
+        log::warn!(
+            "DirectBackend OpenAI: stubbed {total_stubs} missing tool result(s) across {total_assistant_with_tools} assistant turn(s) before sending request",
+        );
+    }
+}
+
 fn project_messages(turns: &[NormalizedTurn], system: &str) -> Vec<Value> {
     let mut out = Vec::with_capacity(turns.len() + 1);
     out.push(json!({"role": "system", "content": system}));
@@ -389,7 +522,7 @@ fn project_messages(turns: &[NormalizedTurn], system: &str) -> Vec<Value> {
                     }));
                 }
             }
-            NormalizedTurn::Assistant { text, tool_uses } => {
+            NormalizedTurn::Assistant { text, tool_uses, reasoning } => {
                 let tool_calls: Vec<Value> = tool_uses
                     .iter()
                     .map(|u| {
@@ -418,7 +551,15 @@ fn project_messages(turns: &[NormalizedTurn], system: &str) -> Vec<Value> {
                     .collect();
                 if tool_calls.is_empty() {
                     if let Some(t) = text {
-                        out.push(json!({"role": "assistant", "content": t}));
+                        let mut msg = serde_json::Map::new();
+                        msg.insert("role".into(), json!("assistant"));
+                        msg.insert("content".into(), json!(t));
+                        // DeepSeek-R1 / o1 require the prior turn's CoT echoed
+                        // back; vanilla OpenAI ignores unknown fields.
+                        if let Some(r) = reasoning.as_ref() {
+                            msg.insert("reasoning_content".into(), json!(r));
+                        }
+                        out.push(Value::Object(msg));
                     }
                 } else {
                     let mut msg = serde_json::Map::new();
@@ -431,12 +572,16 @@ fn project_messages(turns: &[NormalizedTurn], system: &str) -> Vec<Value> {
                             msg.insert("content".into(), Value::Null);
                         }
                     }
+                    if let Some(r) = reasoning.as_ref() {
+                        msg.insert("reasoning_content".into(), json!(r));
+                    }
                     msg.insert("tool_calls".into(), Value::Array(tool_calls));
                     out.push(Value::Object(msg));
                 }
             }
         }
     }
+    ensure_tool_results_complete(&mut out);
     out
 }
 
