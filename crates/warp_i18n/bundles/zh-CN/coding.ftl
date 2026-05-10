@@ -51,3 +51,7 @@ coding-git-commit-message = 提交信息
 coding-git-branch = 分支
 coding-git-included-commits = 包含的提交
 coding-loading = 加载中…
+
+# Mermaid 图渲染失败提示
+coding-mermaid-error-rendering = Mermaid 图渲染出错，请检查语法。
+coding-mermaid-failed-rendering = Mermaid 图渲染失败

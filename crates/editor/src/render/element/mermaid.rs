@@ -82,7 +82,7 @@ impl RenderableBlock for RenderableMermaidDiagram {
         .finish();
         let failure_notice = Align::new(
             Text::new(
-                "Error rendering Mermaid diagram. Please check syntax.",
+                t!("coding-mermaid-error-rendering"),
                 code_text.font_family,
                 code_text.font_size,
             )
@@ -94,7 +94,7 @@ impl RenderableBlock for RenderableMermaidDiagram {
         .finish();
         let timeout_notice = Align::new(
             Text::new(
-                "Failed to render Mermaid diagram",
+                t!("coding-mermaid-failed-rendering"),
                 code_text.font_family,
                 code_text.font_size,
             )

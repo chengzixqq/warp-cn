@@ -51,3 +51,7 @@ coding-git-commit-message = Commit message
 coding-git-branch = Branch
 coding-git-included-commits = Included commits
 coding-loading = Loading…
+
+# Mermaid diagram render failures
+coding-mermaid-error-rendering = Error rendering Mermaid diagram. Please check syntax.
+coding-mermaid-failed-rendering = Failed to render Mermaid diagram
