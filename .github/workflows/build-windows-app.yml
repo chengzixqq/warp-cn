@@ -95,6 +95,13 @@ jobs:
           # 把 ISCC.exe 目录加入后续步骤的 PATH（bundle.ps1 通过 `& ISCC` 调用）。
           "C:\Program Files (x86)\Inno Setup 6" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
+      - name: Install cargo-about (license generation)
+        # bundle.ps1 → prepare_bundled_resources.ps1 会无条件跑 `cargo about generate`
+        # 生成 THIRD_PARTY_LICENSES.txt，缺该子命令则 bundle 步骤必失败。
+        # 版本与 mac workflow / script/install_cargo_release_deps 保持一致。
+        shell: pwsh
+        run: cargo install --locked cargo-about@0.8.4
+
       - name: Build & bundle
         id: bundle
         shell: pwsh
