@@ -673,6 +673,33 @@ END
     .unwrap();
     drop(rcfile);
 
+    // If `WARP_RC` names a standalone resource compiler (e.g. LLVM's `llvm-rc`),
+    // use it directly instead of locating RC.EXE via the Windows SDK / Visual
+    // Studio registry. This enables building the Windows resource with a portable
+    // toolchain (e.g. xwin + LLVM) that has no registered SDK install. The
+    // compiler locates `winres.h` through the `INCLUDE` environment variable, and
+    // `/C 65001` makes it read the UTF-8 `resource.rc` (which contains `©`).
+    if let Some(rc_exe) = env::var_os("WARP_RC").filter(|v| !v.is_empty()) {
+        let res_path = target_dir.join("resource.res");
+        let status = Command::new(&rc_exe)
+            .current_dir(target_dir)
+            .arg("/nologo")
+            .arg("/C")
+            .arg("65001")
+            .arg("/fo")
+            .arg(&res_path)
+            .arg(&resource_file_path)
+            .status()
+            .unwrap_or_else(|err| panic!("Failed to run WARP_RC compiler {rc_exe:?}: {err:#}"));
+        assert!(
+            status.success(),
+            "WARP_RC compiler {rc_exe:?} failed to compile {resource_file_path:?}"
+        );
+        // `.res` files link directly under both MSVC `link` and LLVM `lld-link`.
+        println!("cargo:rustc-link-arg={}", res_path.display());
+        return;
+    }
+
     // Obtain MSVC environment so that the rc compiler can find the right headers.
     // https://github.com/nabijaczleweli/rust-embed-resource/issues/11#issuecomment-603655972
     let target = env::var("TARGET").unwrap();
