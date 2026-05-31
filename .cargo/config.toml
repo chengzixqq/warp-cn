@@ -23,7 +23,7 @@ git-fetch-with-cli = true
 # during bundling, see `script/bundle`). It is passed via the GNU-style `-Wl,`
 # driver syntax and is rejected by Windows (MSVC `link.exe` / `lld-link`) and by
 # the Linux linker, so it must only be applied on macOS.
-rustflags = ["-C", "link-args=-Wl,-headerpad_max_install_names"]
+rustflags = ["-C", "symbol-mangling-version=v0", "-C", "link-args=-Wl,-headerpad_max_install_names"]
 
 [target.'cfg(target_family = "wasm")']
 rustflags = ["--cfg=web_sys_unstable_apis"]
