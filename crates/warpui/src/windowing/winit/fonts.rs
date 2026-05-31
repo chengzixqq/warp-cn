@@ -300,18 +300,37 @@ impl Default for TextLayoutSystem {
 
 impl TextLayoutSystem {
     pub fn new() -> Self {
+        let locale = warp_i18n::try_global()
+            .map(|i18n| i18n.current().as_bcp47().to_string())
+            .unwrap_or_else(|| "en".to_string());
+
+        let mut db = cosmic_text::fontdb::Database::new();
+
+        // On Windows, pre-load system fonts so cosmic-text's FontFallbackIter
+        // can find CJK typefaces (e.g. Microsoft YaHei) during shaping.
+        // Without this the db is empty and Han script fallback silently
+        // produces .notdef glyphs (tofu) in UI text.
+        #[cfg(target_os = "windows")]
+        db.load_system_fonts();
+
+        let font_system =
+            cosmic_text::FontSystem::new_with_locale_and_db(locale, db);
+
+        // Register every pre-loaded face in font_id_map so that fontdb::IDs
+        // returned by cosmic-text shaping can be resolved back to FontId
+        // without panicking (see insert_font comment at line ~507).
+        let font_id_map = {
+            let mut map = BiMap::new();
+            for face in font_system.db().faces() {
+                map.insert(next_font_id(), face.id);
+            }
+            RwLock::new(map)
+        };
+
         Self {
             families: Default::default(),
-            font_store: RwLock::new(cosmic_text::FontSystem::new_with_locale_and_db(
-                // Match the active i18n locale at construction so cosmic_text biases CJK script
-                // fallback correctly for zh-CN users. Runtime locale switches re-create no caches;
-                // a full FontSystem rebuild on set_locale is intentionally out of scope.
-                warp_i18n::try_global()
-                    .map(|i18n| i18n.current().as_bcp47().to_string())
-                    .unwrap_or_else(|| "en".to_string()),
-                Default::default(),
-            )),
-            font_id_map: Default::default(),
+            font_store: RwLock::new(font_system),
+            font_id_map,
             font_selections: Default::default(),
             loaded_fonts: Default::default(),
             #[cfg(not(target_os = "windows"))]
