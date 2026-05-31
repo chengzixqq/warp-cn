@@ -322,23 +322,29 @@ impl TextLayoutSystem {
                 .unwrap_or_else(|| std::path::PathBuf::from("C:\\Windows"))
                 .join("Fonts");
             // Microsoft YaHei (modern Simplified Chinese UI font) regular/bold/
-            // light, SimSun as a legacy serif fallback, and Segoe UI Emoji so
-            // emoji glyphs in UI text keep rendering. `.ttc` collections load
-            // all contained faces.
+            // light plus SimSun as a legacy serif fallback. These carry the Han
+            // glyphs the UI needs. `.ttc` collections load all contained faces.
             const CJK_FONT_FILES: &[&str] = &[
                 "msyh.ttc",
                 "msyhbd.ttc",
                 "msyhl.ttc",
                 "simsun.ttc",
-                "seguiemj.ttf",
             ];
-            let mut loaded_any = false;
+            let mut loaded_cjk = false;
             for file in CJK_FONT_FILES {
                 if db.load_font_file(fonts_dir.join(file)).is_ok() {
-                    loaded_any = true;
+                    loaded_cjk = true;
                 }
             }
-            if !loaded_any {
+            // Segoe UI Emoji keeps emoji glyphs in UI text rendering. It carries
+            // no Han glyphs, so it must NOT count towards loaded_cjk: otherwise a
+            // stripped image that has only the emoji font would skip the fallback
+            // below and still render Chinese as tofu.
+            let _ = db.load_font_file(fonts_dir.join("seguiemj.ttf"));
+            // If no Han-capable face was found (stripped/custom image), fall back
+            // to a full system scan so any other installed CJK font can satisfy
+            // shaping rather than regressing to tofu.
+            if !loaded_cjk {
                 db.load_system_fonts();
             }
         }
@@ -349,10 +355,21 @@ impl TextLayoutSystem {
         // Register every pre-loaded face in font_id_map so that fontdb::IDs
         // returned by cosmic-text shaping can be resolved back to FontId
         // without panicking (see insert_font comment at line ~507).
+        //
+        // Collect the assigned FontIds so the fontkit rasterizer (when enabled)
+        // learns about every preloaded face too. insert_font pushes each new id
+        // onto loaded_font_ids_since_last_raster for exactly this reason; without
+        // it, rasterizing a glyph that resolved to a preloaded face panics in
+        // Rasterizer::font_for_id ("Font must exist").
+        #[cfg(feature = "fontkit-rasterizer")]
+        let mut preloaded_font_ids = Vec::new();
         let font_id_map = {
             let mut map = BiMap::new();
             for face in font_system.db().faces() {
-                map.insert(next_font_id(), face.id);
+                let font_id = next_font_id();
+                map.insert(font_id, face.id);
+                #[cfg(feature = "fontkit-rasterizer")]
+                preloaded_font_ids.push(font_id);
             }
             RwLock::new(map)
         };
@@ -366,7 +383,7 @@ impl TextLayoutSystem {
             #[cfg(not(target_os = "windows"))]
             fallback_fonts: Default::default(),
             #[cfg(feature = "fontkit-rasterizer")]
-            loaded_font_ids_since_last_raster: Default::default(),
+            loaded_font_ids_since_last_raster: RwLock::new(preloaded_font_ids),
         }
     }
 
