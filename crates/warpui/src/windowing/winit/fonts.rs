@@ -306,12 +306,42 @@ impl TextLayoutSystem {
 
         let mut db = cosmic_text::fontdb::Database::new();
 
-        // On Windows, pre-load system fonts so cosmic-text's FontFallbackIter
-        // can find CJK typefaces (e.g. Microsoft YaHei) during shaping.
-        // Without this the db is empty and Han script fallback silently
-        // produces .notdef glyphs (tofu) in UI text.
+        // On Windows, cosmic-text's FontFallbackIter needs CJK typefaces in the
+        // fontdb or Han-script shaping silently yields .notdef glyphs (tofu) in
+        // UI text such as the settings sidebar. Loading the *entire* system
+        // font collection works but enumerates hundreds of faces and adds a
+        // noticeable chunk to startup. Instead, load just the handful of CJK
+        // (+ emoji) fonts that ship with every default Windows install. If none
+        // are found (a stripped/custom image), fall back to a full system scan
+        // so CJK still renders rather than regressing to tofu.
         #[cfg(target_os = "windows")]
-        db.load_system_fonts();
+        {
+            // Resolve %WINDIR%\Fonts so non-C: system drives still work.
+            let fonts_dir = std::env::var_os("WINDIR")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| std::path::PathBuf::from("C:\\Windows"))
+                .join("Fonts");
+            // Microsoft YaHei (modern Simplified Chinese UI font) regular/bold/
+            // light, SimSun as a legacy serif fallback, and Segoe UI Emoji so
+            // emoji glyphs in UI text keep rendering. `.ttc` collections load
+            // all contained faces.
+            const CJK_FONT_FILES: &[&str] = &[
+                "msyh.ttc",
+                "msyhbd.ttc",
+                "msyhl.ttc",
+                "simsun.ttc",
+                "seguiemj.ttf",
+            ];
+            let mut loaded_any = false;
+            for file in CJK_FONT_FILES {
+                if db.load_font_file(fonts_dir.join(file)).is_ok() {
+                    loaded_any = true;
+                }
+            }
+            if !loaded_any {
+                db.load_system_fonts();
+            }
+        }
 
         let font_system =
             cosmic_text::FontSystem::new_with_locale_and_db(locale, db);
