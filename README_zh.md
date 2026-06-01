@@ -75,7 +75,7 @@ resources\                ← 打包资源（由安装流程生成）
 
 ### 从源码构建
 
-在 Windows 上构建需要 MSVC 工具链（Visual Studio 2022 Build Tools，含 Windows SDK）。`app/build.rs` 经注册表定位 `cl.exe` 以装配 MSVC 环境（让资源编译器能找到头文件），再由 embed-resource 调用 `rc.exe` 编译资源：
+在 Windows 上构建有两条资源编译路径。默认（未设置 `WARP_RC` 时）需要 MSVC 工具链（Visual Studio 2022 Build Tools，含 Windows SDK）：`app/build.rs` 经注册表定位 `cl.exe` 以装配 MSVC 环境（让资源编译器能找到头文件），再由 embed-resource 调用 `rc.exe` 编译资源：
 
 ```sh
 cargo build --release --bin warp-oss --features gui
@@ -83,7 +83,7 @@ cargo build --release --bin warp-oss --features gui
 
 还需 `protoc`（protobuf 编译器）在 PATH 上。
 
-> **免 Visual Studio 的便携工具链**（LLVM `clang-cl` / `lld-link` / `llvm-rc` + xwin，通过 `WARP_RC` 环境变量指定独立资源编译器）尚未合入 master，相关支持见 PR #31；合并后详细配置见 `docs/building-windows-portable.md`。
+> **免 Visual Studio 的便携工具链**（LLVM `clang-cl` / `lld-link` / `llvm-rc` + xwin）已支持：设置 `WARP_RC` 环境变量指向独立资源编译器（如 `llvm-rc`）后，`app/build.rs` 会直接用它编译资源、跳过上面的 `cl.exe` 注册表查找。详细配置见 [`docs/building-windows-portable.md`](docs/building-windows-portable.md)。
 
 ### 中文渲染
 
