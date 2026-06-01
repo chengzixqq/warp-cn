@@ -49,12 +49,16 @@ else
   git remote add "$UPSTREAM_REMOTE" "$UPSTREAM_URL"
 fi
 
-# Shallow-fetch is enough; deepen if git complains.
-git fetch "$UPSTREAM_REMOTE" "$UPSTREAM_BRANCH" --depth 200 || \
-  git fetch "$UPSTREAM_REMOTE" "$UPSTREAM_BRANCH"
+# Full history is required: the fork's merge-base with upstream can be hundreds of
+# commits deep (487 as of 2026-06, at upstream 35cb40c3 / 2026-05-10). A shallow
+# `--depth N` fetch that doesn't reach the merge-base makes git treat the two
+# histories as unrelated ("refusing to merge unrelated histories") and abort. We
+# already share history up to the last sync, so a full fetch only transfers the new
+# upstream commits, not the entire repo.
+git fetch "$UPSTREAM_REMOTE" "$UPSTREAM_BRANCH"
 
 # Make sure the local base branch is up to date with origin (where CI's checkout lands).
-git fetch origin "$BASE_BRANCH" --depth 200 2>/dev/null || true
+git fetch origin "$BASE_BRANCH" 2>/dev/null || true
 
 git checkout -B "$SYNC_BRANCH" "origin/$BASE_BRANCH" 2>/dev/null \
   || git checkout -B "$SYNC_BRANCH" "$BASE_BRANCH"
@@ -66,6 +70,17 @@ if git merge --no-ff "$UPSTREAM_REMOTE/$UPSTREAM_BRANCH" \
   echo "::notice::clean merge into $SYNC_BRANCH"
   emit "status=clean"
   exit 0
+fi
+
+# `git merge` exited non-zero. Distinguish a real conflicted merge (MERGE_HEAD set,
+# merge started and stopped) from a pre-merge fatal where no merge ever began (e.g.
+# "refusing to merge unrelated histories", a bad ref, or a fetch problem). In the
+# latter there is nothing to finalize or snapshot, so surface it as a hard error
+# instead of mis-reporting a clean sync (COUNT would be 0 with no merge in flight).
+if ! git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+  echo "::error::git merge failed before starting (no MERGE_HEAD) — likely unrelated histories or a fetch problem; not a content conflict"
+  emit "status=error"
+  exit 1
 fi
 
 # Conflict path: capture conflicted paths, snapshot the conflict state as a WIP commit

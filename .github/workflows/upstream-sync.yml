@@ -60,6 +60,17 @@ jobs:
         run: ./script/sync-upstream
         continue-on-error: true
 
+      # The merge step is continue-on-error so a conflict (exit 2) can route to
+      # open-issue via outputs. But an unexpected failure (status=error or no status
+      # emitted at all) must not pass silently — without this the run goes green and
+      # every downstream job skips. Fail loudly unless the sync is clean or a real
+      # conflict.
+      - name: Fail on unexpected sync error
+        if: steps.merge.outputs.status != 'clean' && steps.merge.outputs.status != 'conflict'
+        run: |
+          echo "::error::upstream sync failed unexpectedly (status='${{ steps.merge.outputs.status }}', merge outcome='${{ steps.merge.outcome }}')"
+          exit 1
+
       - name: Push sync branch
         if: steps.merge.outputs.sync_branch != ''
         run: git push --force-with-lease origin "${{ steps.merge.outputs.sync_branch }}"
