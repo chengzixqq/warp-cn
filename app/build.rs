@@ -31,6 +31,12 @@ fn main() -> Result<()> {
     println!("cargo:rerun-if-env-changed=GIT_RELEASE_TAG");
     println!("cargo:rerun-if-env-changed=GIT_COMMIT_SHA");
     println!("cargo:rerun-if-env-changed=WARP_UPDATE_PUBKEY");
+    // WARP_RC selects a standalone Windows resource compiler (see
+    // embed_resource_file); INCLUDE is what that compiler reads to find winres.h.
+    // Register both so toggling the portable toolchain reruns this script instead
+    // of reusing a stale .res from the previous resource-compiler branch.
+    println!("cargo:rerun-if-env-changed=WARP_RC");
+    println!("cargo:rerun-if-env-changed=INCLUDE");
 
     emit_git_release_tag_if_unset();
     emit_git_commit_sha_if_unset();
@@ -672,6 +678,33 @@ END
     )
     .unwrap();
     drop(rcfile);
+
+    // If `WARP_RC` names a standalone resource compiler (e.g. LLVM's `llvm-rc`),
+    // use it directly instead of locating RC.EXE via the Windows SDK / Visual
+    // Studio registry. This enables building the Windows resource with a portable
+    // toolchain (e.g. xwin + LLVM) that has no registered SDK install. The
+    // compiler locates `winres.h` through the `INCLUDE` environment variable, and
+    // `/C 65001` makes it read the UTF-8 `resource.rc` (which contains `©`).
+    if let Some(rc_exe) = env::var_os("WARP_RC").filter(|v| !v.is_empty()) {
+        let res_path = target_dir.join("resource.res");
+        let status = Command::new(&rc_exe)
+            .current_dir(target_dir)
+            .arg("/nologo")
+            .arg("/C")
+            .arg("65001")
+            .arg("/fo")
+            .arg(&res_path)
+            .arg(&resource_file_path)
+            .status()
+            .unwrap_or_else(|err| panic!("Failed to run WARP_RC compiler {rc_exe:?}: {err:#}"));
+        assert!(
+            status.success(),
+            "WARP_RC compiler {rc_exe:?} failed to compile {resource_file_path:?}"
+        );
+        // `.res` files link directly under both MSVC `link` and LLVM `lld-link`.
+        println!("cargo:rustc-link-arg={}", res_path.display());
+        return;
+    }
 
     // Obtain MSVC environment so that the rc compiler can find the right headers.
     // https://github.com/nabijaczleweli/rust-embed-resource/issues/11#issuecomment-603655972
